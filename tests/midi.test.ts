@@ -65,6 +65,17 @@ it("节奏模式仅在开启伴奏时播放未练习手，示范仍完整播放"
     ),
   ).toEqual([72, 48, 60]);
 });
+it("歌曲自由练习不输出原曲、另一只手或伴奏", () => {
+  for (const hand of ["left", "right", "both"] as const)
+    expect(
+      playbackNotes(playbackSong, {
+        ...defaults,
+        mode: "free",
+        hand,
+        backing: true,
+      }),
+    ).toEqual([]);
+});
 it("MIDI 通道只清理软件输出，并在输入断线时暂停", async () => {
   const sent: number[][] = [];
   let paused = 0;

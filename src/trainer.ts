@@ -92,7 +92,7 @@ export class Trainer {
     return this.settings.mode === "wait" && this.target.length > 0;
   }
   startRun(now: number, countIn = true) {
-    if (this.done) return;
+    if (this.done || this.settings.mode === "free") return;
     this.running = true;
     this.lastNow = now;
     if (countIn && this.settings.mode !== "wait") {
@@ -198,7 +198,12 @@ export class Trainer {
     this.lastVelocity = velocity;
     this.held.set(midi, { time: now, serial: ++this.serial, velocity });
     this.wrongKey = -1;
-    if (!this.running || this.settings.mode === "listen") return;
+    if (
+      !this.running ||
+      this.settings.mode === "listen" ||
+      this.settings.mode === "free"
+    )
+      return;
     this.update(now);
     if (!this.running) return;
     if (this.settings.mode === "wait") {

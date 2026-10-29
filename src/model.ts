@@ -58,7 +58,7 @@ export interface Settings {
   registerMode?: "follow" | "lock" | "full";
   speed: number;
   hand: Hand;
-  mode: "wait" | "rhythm" | "listen";
+  mode: "wait" | "free" | "rhythm" | "listen";
   loop: boolean;
   from: number;
   to: number;
@@ -137,7 +137,12 @@ export function practiceNotes(song: Song, s: Pick<Settings, "hand" | "split">) {
     .filter((n) => selected(n, s.hand));
 }
 export function playbackNotes(song: Song, s: Settings) {
-  if (s.mode === "wait" || (s.mode === "rhythm" && !s.backing)) return [];
+  if (
+    s.mode === "wait" ||
+    s.mode === "free" ||
+    (s.mode === "rhythm" && !s.backing)
+  )
+    return [];
   const practiceIds = new Set(practiceNotes(song, s).map((n) => n.id));
   return song.notes.filter((n) => {
     const role = song.tracks.find((t) => t.id === n.track)?.role;

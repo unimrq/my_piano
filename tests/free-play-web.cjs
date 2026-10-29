@@ -47,10 +47,25 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
         errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await page.goto(base);
-      await page.getByRole("button", { name: "自由练习", exact: true }).click();
+      await page.locator(".music-card").first().waitFor();
+      assert.equal(
+        await page
+          .getByRole("button", { name: "自由练习", exact: true })
+          .count(),
+        0,
+      );
+      await page.locator(".music-card").first().click();
+      await page.locator(".sheet-host svg").first().waitFor();
+      const title = await page.locator(".song-name").textContent();
+      await page.getByTitle("更多设置", { exact: true }).click();
+      await page.getByRole("tab", { name: "练习", exact: true }).click();
+      await page.getByLabel("练习模式", { exact: true }).selectOption("free");
+      await page.locator(".panel-heading button").click();
       const plot = page.getByLabel("上升音符", { exact: true });
       await plot.waitFor();
-      assert.equal(await page.locator(".sheet").count(), 0);
+      assert.equal(await page.locator(".sheet").count(), 1);
+      assert.equal(await page.locator(".song-name").textContent(), title);
+      await page.locator(".sheet-host svg").first().waitFor();
       assert.equal(
         await page.getByRole("button", { name: "开始", exact: true }).count(),
         0,
@@ -58,8 +73,9 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
       await page.getByTitle("更多设置", { exact: true }).click();
       assert.equal(
         await page.getByRole("tab", { name: "练习", exact: true }).count(),
-        0,
+        1,
       );
+      await page.getByRole("tab", { name: "设备", exact: true }).click();
       await page.getByRole("button", { name: "连接钢琴", exact: true }).click();
       await page.getByLabel("MIDI 输入").selectOption("free-in");
       await page.locator(".panel-heading button").click();
@@ -115,12 +131,33 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           "0",
       );
       await page.getByRole("button", { name: "曲库", exact: true }).click();
+      // The selected mode belongs only to this song, and survives a browser reload.
+      await page.reload();
       await page.locator(".music-card").first().click();
-      await page.locator(".sheet-host svg").first().waitFor();
+      await plot.waitFor();
+      assert.equal(await page.locator(".song-name").textContent(), title);
+      assert.equal(await page.locator(".sheet").count(), 1);
+      await page.getByTitle("更多设置", { exact: true }).click();
+      await page.getByRole("tab", { name: "练习", exact: true }).click();
       assert.equal(
-        await page.getByLabel("上升音符", { exact: true }).count(),
-        0,
+        await page.getByLabel("练习模式", { exact: true }).inputValue(),
+        "free",
       );
+      await page.getByLabel("练习模式", { exact: true }).selectOption("wait");
+      await page.locator(".panel-heading button").click();
+      await page.getByLabel("下落音符", { exact: true }).waitFor();
+      assert.equal(await plot.count(), 0);
+      assert.equal(await page.locator(".song-name").textContent(), title);
+      await page.getByTitle("更多设置", { exact: true }).click();
+      await page.getByRole("tab", { name: "练习", exact: true }).click();
+      await page.getByLabel("练习模式", { exact: true }).selectOption("free");
+      await page.locator(".panel-heading button").click();
+      await plot.waitFor();
+      assert.equal(await plot.getAttribute("data-notes"), "0");
+      await page.getByRole("button", { name: "曲库", exact: true }).click();
+      await page.locator(".music-card").nth(1).click();
+      await page.getByLabel("下落音符", { exact: true }).waitFor();
+      assert.equal(await plot.count(), 0);
       assert.deepEqual(errors, []);
       console.log(
         JSON.stringify({
@@ -131,7 +168,10 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           clear: true,
           noScore: true,
           noMidiEcho: true,
-          returnToSong: true,
+          songScoreRetained: true,
+          perSongModeSaved: true,
+          switchBackToWait: true,
+          otherSongUnchanged: true,
           passed: true,
         }),
       );

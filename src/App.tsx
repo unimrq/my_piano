@@ -57,9 +57,6 @@ const initial = (): Library => ({
   lastSong: "loading",
 });
 export default function App() {
-  const [freePlay, setFreePlay] = useState(false);
-  const freeMode = useRef(false);
-  freeMode.current = freePlay;
   const freeSession = useRef(new FreePlaySession());
   const [handSize, setHandSize] = useState<HandSize>("M");
   const [autoFingers, setAutoFingers] = useState(true);
@@ -89,6 +86,7 @@ export default function App() {
     } | null>(null),
     [result, setResult] = useState<Result | null>(null),
     [busy, setBusy] = useState(false);
+  const freePlay = settings.mode === "free";
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const song = library.songs.find((s) => s.id === songId) ?? library.songs[0];
@@ -132,6 +130,7 @@ export default function App() {
   };
   const reset = (s = song, config = settings) => {
     pause();
+    freeSession.current.clear();
     engine.current = new Trainer(s, config);
     activeMs.current = 0;
     lastClick.current = -999;
@@ -176,6 +175,7 @@ export default function App() {
     }
   }
   const configure = (patch: Partial<Settings>) => {
+    if (patch.mode !== undefined) setLoopTool(false);
     const next = {
       ...settings,
       ...("from" in patch || "to" in patch ? { startBeat: undefined } : {}),
@@ -191,7 +191,6 @@ export default function App() {
     }));
   };
   const choose = (s: Song) => {
-    setFreePlay(false);
     setLibrary((l) => ({
       ...l,
       songs: l.songs.some((item) => item.id === s.id)
@@ -295,7 +294,7 @@ export default function App() {
     const midi = new MidiDevices(
       () => devicesChanged((v) => v + 1),
       (data) => {
-        if (freeMode.current) {
+        if (settingsRef.current.mode === "free" && !homeRef.current) {
           freeSession.current.input(data, performance.now() / 1000);
           return;
         }
@@ -388,7 +387,7 @@ export default function App() {
   const finish = () => {
     const e = engine.current;
     resetOutput();
-    if (e.settings.mode === "listen") return;
+    if (e.settings.mode === "listen" || e.settings.mode === "free") return;
     const r: Result = {
       id: newId(),
       songId: e.song.id,
@@ -510,6 +509,7 @@ export default function App() {
     }
   }
   async function start() {
+    if (settings.mode === "free") return;
     setError("");
     const e = engine.current;
     if (e.running) {
@@ -647,14 +647,6 @@ export default function App() {
       {home && (
         <LibraryHome
           library={library}
-          onFreePlay={() => {
-            pause();
-            freeSession.current.clear();
-            setResult(null);
-            setFreePlay(true);
-            setHome(false);
-            setPanel(null);
-          }}
           onChoose={choose}
           onFavorite={(s) =>
             setLibrary((l) => ({
@@ -684,25 +676,20 @@ export default function App() {
           onClick={() => {
             pause();
             setHome(true);
-            setFreePlay(false);
             setPanel(null);
           }}
         >
           <Icon name="back" />
           曲库
         </button>
-        {freePlay ? (
-          <span className="song-button song-name">自由练习</span>
-        ) : (
-          <button
-            className="song-button"
-            onClick={() => setPanel(panel === "library" ? null : "library")}
-            title="打开曲库"
-          >
-            <span className="song-name">{song.title}</span>
-            <Icon name="chevron" />
-          </button>
-        )}
+        <button
+          className="song-button"
+          onClick={() => setPanel(panel === "library" ? null : "library")}
+          title="打开曲库"
+        >
+          <span className="song-name">{song.title}</span>
+          <Icon name="chevron" />
+        </button>
         <div className="toolbar">
           {freePlay ? (
             <button onClick={() => freeSession.current.clear()}>清空</button>
@@ -786,7 +773,6 @@ export default function App() {
             className="icon-button"
             title="更多设置"
             onClick={() => {
-              if (freePlay) setSettingsTab("device");
               setPanel(panel === "settings" ? null : "settings");
             }}
           >
@@ -808,6 +794,55 @@ export default function App() {
       )}
       {!home && (
         <main>
+          <section
+            className="sheet"
+            style={{ height: `${settings.sheetHeight}%` }}
+          >
+            <Sheet
+              xml={song.xml}
+              beat={Math.max(e.start, e.beat)}
+              trainer={e}
+              loopTool={freePlay ? false : loopTool}
+              onLoop={([from, to]) => {
+                const running = engine.current.running;
+                configure({ from, to, loop: true });
+                if (running) engine.current.startRun(performance.now(), false);
+                setLoopTool(false);
+              }}
+              onSeek={(beat) =>
+                configure({
+                  from:
+                    (song.measures.findLast((m) => m.beat <= beat)?.index ??
+                      0) + 1,
+                  to: Math.max(
+                    settings.to,
+                    (song.measures.findLast((m) => m.beat <= beat)?.index ??
+                      0) + 1,
+                  ),
+                  startBeat: beat,
+                })
+              }
+            />
+          </section>
+          <input
+            className="resize"
+            aria-label="曲谱区域高度"
+            type="range"
+            min="22"
+            max="48"
+            value={settings.sheetHeight}
+            onChange={(v) => {
+              const h = Number(v.target.value);
+              setSettings((s) => ({ ...s, sheetHeight: h }));
+              setLibrary((l) => ({
+                ...l,
+                settings: {
+                  ...l.settings,
+                  [songId]: { ...settings, sheetHeight: h },
+                },
+              }));
+            }}
+          />
           {freePlay ? (
             <FreePlay
               session={freeSession.current}
@@ -816,59 +851,7 @@ export default function App() {
               registerMode={settings.registerMode}
             />
           ) : (
-            <>
-              <section
-                className="sheet"
-                style={{ height: `${settings.sheetHeight}%` }}
-              >
-                <Sheet
-                  xml={song.xml}
-                  beat={Math.max(e.start, e.beat)}
-                  trainer={e}
-                  loopTool={loopTool}
-                  onLoop={([from, to]) => {
-                    const running = engine.current.running;
-                    configure({ from, to, loop: true });
-                    if (running)
-                      engine.current.startRun(performance.now(), false);
-                    setLoopTool(false);
-                  }}
-                  onSeek={(beat) =>
-                    configure({
-                      from:
-                        (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                          0) + 1,
-                      to: Math.max(
-                        settings.to,
-                        (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                          0) + 1,
-                      ),
-                      startBeat: beat,
-                    })
-                  }
-                />
-              </section>
-              <input
-                className="resize"
-                aria-label="曲谱区域高度"
-                type="range"
-                min="22"
-                max="48"
-                value={settings.sheetHeight}
-                onChange={(v) => {
-                  const h = Number(v.target.value);
-                  setSettings((s) => ({ ...s, sheetHeight: h }));
-                  setLibrary((l) => ({
-                    ...l,
-                    settings: {
-                      ...l.settings,
-                      [songId]: { ...settings, sheetHeight: h },
-                    },
-                  }));
-                }}
-              />
-              <Roll song={song} settings={settings} trainer={e} />
-            </>
+            <Roll song={song} settings={settings} trainer={e} />
           )}
         </main>
       )}
@@ -957,20 +940,18 @@ export default function App() {
                       ["device", "设备"],
                       ["display", "显示"],
                     ] as const
-                  )
-                    .filter(([id]) => !freePlay || id !== "practice")
-                    .map(([id, label]) => (
-                      <button
-                        key={id}
-                        role="tab"
-                        aria-selected={settingsTab === id}
-                        aria-controls={`settings-${id}`}
-                        id={`tab-${id}`}
-                        onClick={() => setSettingsTab(id)}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      role="tab"
+                      aria-selected={settingsTab === id}
+                      aria-controls={`settings-${id}`}
+                      id={`tab-${id}`}
+                      onClick={() => setSettingsTab(id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
                 <div className="settings-pages">
                   <div
@@ -993,11 +974,12 @@ export default function App() {
                             }
                           >
                             <option value="wait">自由跟弹</option>
+                            <option value="free">自由练习</option>
                             <option value="rhythm">节奏模式</option>
                             <option value="listen">示范播放</option>
                           </select>
                         </label>
-                        <label className="field">
+                        <label className="field" hidden={freePlay}>
                           声部
                           <select
                             aria-label="练习双手"
@@ -1014,7 +996,7 @@ export default function App() {
                           </select>
                         </label>
                       </div>
-                      <label className="toggle-row">
+                      <label className="toggle-row" hidden={freePlay}>
                         循环练习
                         <input
                           type="checkbox"
@@ -1024,7 +1006,7 @@ export default function App() {
                           }
                         />
                       </label>
-                      <div className="loop-range">
+                      <div className="loop-range" hidden={freePlay}>
                         <label>
                           起始小节
                           <input
@@ -1214,7 +1196,7 @@ export default function App() {
                         />
                       </label>
                     </section>
-                    <details className="settings-advanced" hidden={freePlay}>
+                    <details className="settings-advanced">
                       <summary>声部分配</summary>
                       {song.tracks.map((t) => (
                         <label className="field track" key={t.id}>

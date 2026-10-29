@@ -33,6 +33,21 @@ const fixture = (pitches = [60, 60, 62], beats = [0, 1, 2]): Song => ({
 });
 const trainer = (s = fixture(), patch = {}) =>
   new Trainer(s, { ...defaults, speed: 100, to: 1, ...patch });
+
+it("自由练习保留选定曲谱位置，不按曲谱推进、计分或完成", () => {
+  const e = trainer(fixture(), { mode: "free", startBeat: 1 });
+  e.startRun(0);
+  e.down(60, 90, 100);
+  e.up(60, 200);
+  e.down(90, 80, 300);
+  e.update(60000);
+  expect(e.beat).toBe(1);
+  expect(e.running).toBe(false);
+  expect(e.done).toBe(false);
+  expect(e.waiting).toBe(false);
+  expect(e.stats).toMatchObject({ correct: 0, wrong: 0, missed: 0 });
+  expect(e.feedback.size).toBe(0);
+});
 describe("等待模式", () => {
   it.each([25, 50, 100, 150])(
     "%i%% 速度都可以立即弹下一音，也可以任意停顿",
