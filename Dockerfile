@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build
+RUN npm test && npm run build
 
 FROM nginx:stable-alpine
 COPY deploy/nginx.conf /etc/nginx/nginx.conf

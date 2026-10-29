@@ -77,7 +77,7 @@ npm run test:toolbar
 
 数字 1～5 分别代表拇指至小指。建议算法改编自 PianoPlayer，按手部移动成本搜索，不保证等同教师或出版谱指法。超出五指、跨度或与原标注冲突而无法分配的音组保留空白，不强行标注。当前最多处理两万音；不自动处理交叉手或识别实际使用的手指。当前入口是“补全缺失”，再次点击会保留上一次生成的结果。
 
-Docker 可在项目目录运行 `docker compose up -d --build`，默认打开 `http://localhost:8080/`；远程访问使用 HTTPS 反向代理。配置细节与未验证范围见[部署说明](docs/部署说明.md#docker-部署)。
+Docker 可在项目目录运行 `docker compose up -d --build`，默认打开 `http://localhost:8080/`；远程访问使用 HTTPS 反向代理。镜像构建包含核心测试，GitHub Actions 另检查容器启动、资源完整性与运行权限。配置细节见[部署说明](docs/部署说明.md#docker-部署)，运行结果见 [Docker 检查](https://github.com/unimrq/my_piano/actions/workflows/docker.yml)。
 
 ## 自由练习
 

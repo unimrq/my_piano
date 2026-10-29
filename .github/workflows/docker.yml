@@ -1,0 +1,31 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check Compose configuration
+        run: docker compose config --quiet
+      - name: Build and start
+        run: docker compose up -d --build --wait --wait-timeout 90
+      - name: Check HTTP resources and container permissions
+        run: node tests/docker-smoke.cjs
+      - name: Container logs
+        if: always()
+        run: docker compose logs --tail=100
+      - name: Stop test container
+        if: always()
+        run: docker compose down --volumes
