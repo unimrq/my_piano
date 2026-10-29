@@ -85,6 +85,29 @@ const request = (url, method = "GET") =>
   assert(files.some((file) => /fingering\.worker-.*\.js$/.test(file)));
   assert(files.some((file) => /licenses\/PianoPlayer-MIT\.txt$/.test(file)));
   assert(!files.some((file) => /personal-/i.test(file)));
+  assert(files.includes("./audio/piano/manifest.json"));
+  const audioManifest = await request("/audio/piano/manifest.json");
+  assert.equal(audioManifest.status, 200);
+  assert.match(audioManifest.headers["content-type"], /application\/json/);
+  const piano = JSON.parse(audioManifest.body);
+  assert.equal(piano.author, "Alexander Holm");
+  assert.equal(piano.license, "CC BY 3.0");
+  assert.equal(piano.sourceCommit, "efd8296360f9526e379bfbe5c1698ff54d6a1d34");
+  assert.equal(piano.sampleCount, 30);
+  assert.equal(piano.samples.length, 30);
+  assert.deepEqual(
+    piano.samples.map((sample) => sample.midi),
+    Array.from({ length: 30 }, (_, i) => 21 + i * 3),
+  );
+  assert.equal(
+    files.filter((file) => /^\.\/audio\/piano\/.*\.mp3$/.test(file)).length,
+    30,
+  );
+  for (const sample of piano.samples)
+    assert(files.includes("./audio/piano/" + sample.file), sample.file);
+  for (const file of ["Salamander-CC-BY-3.0.txt", "Salamander-ATTRIBUTION.txt"])
+    assert(files.includes("./licenses/" + file), file);
+  let pianoBytes = 0;
   for (const file of files) {
     const resource = await request("/" + file.replace(/^\.\//, ""));
     assert.equal(resource.status, 200, file);
@@ -92,7 +115,50 @@ const request = (url, method = "GET") =>
       assert.match(resource.headers["content-type"], /javascript/, file);
     if (file.endsWith(".css"))
       assert.match(resource.headers["content-type"], /text\/css/, file);
+    const sample = piano.samples.find(
+      (sample) => file === "./audio/piano/" + sample.file,
+    );
+    if (sample) {
+      assert.match(
+        resource.headers["content-type"],
+        /^audio\/mpeg(?:;|$)/,
+        file,
+      );
+      assert.equal(resource.body.length, sample.bytes, file);
+      assert.equal(
+        createHash("sha256").update(resource.body).digest("hex"),
+        sample.sha256,
+        file,
+      );
+      pianoBytes += resource.body.length;
+    }
+    if (file === "./licenses/Salamander-CC-BY-3.0.txt") {
+      assert.match(resource.headers["content-type"], /text\/plain/, file);
+      const text = resource.body.toString().replaceAll("\r\n", "\n");
+      assert.match(
+        text,
+        /^Creative Commons Legal Code\s+Attribution 3\.0 Unported/,
+      );
+      assert.equal(
+        createHash("sha256").update(text).digest("hex"),
+        piano.licenseText.sha256,
+        file,
+      );
+    }
+    if (file === "./licenses/Salamander-ATTRIBUTION.txt") {
+      assert.match(resource.headers["content-type"], /text\/plain/, file);
+      const text = resource.body.toString();
+      assert.match(text, /Original author: Alexander Holm/);
+      assert.match(text, /Distribution source: Tone\.js audio repository/);
+      assert(text.includes(piano.sourceCommit));
+      assert.match(
+        text,
+        /Creative Commons Attribution 3\.0 Unported \(CC BY 3\.0\)/,
+      );
+      assert(text.includes(piano.licenseUrl));
+    }
   }
+  assert.equal(pianoBytes, piano.sampleBytes);
   const manifest = JSON.parse((await request("/catalogue/manifest.json")).body);
   assert.equal(manifest.length, 5);
   for (const score of manifest) {
@@ -121,6 +187,9 @@ const request = (url, method = "GET") =>
       passed: true,
       cachedResources: files.length,
       publicScores: manifest.length,
+      pianoSamples: piano.samples.length,
+      pianoBytes,
+      pianoLicenseChecked: true,
       nonRoot: true,
       readOnly: true,
       restrictedPermissions: true,

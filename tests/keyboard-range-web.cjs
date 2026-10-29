@@ -160,6 +160,62 @@ async function dragKeyboard(page, expected) {
   );
   await widthIs(page, expected);
 }
+async function singleFarNoteReturns(page) {
+  const home = Number(await keys(page).getAttribute("data-first-white"));
+  const plot = page.getByLabel("上升音符", { exact: true });
+  const previousNotes = Number(await plot.getAttribute("data-notes"));
+  const observationStart = await page.evaluate(
+    () => rangeProbe.observations.length,
+  );
+  await page.evaluate(() => rangeNote(108, 100));
+  await page.waitForFunction(
+    (initial) => {
+      const host = document.querySelector(".free-play");
+      const plot = host.querySelector('[aria-label="上升音符"]');
+      return (
+        plot.dataset.active === "1" &&
+        Number(host.dataset.firstWhite) !== initial
+      );
+    },
+    home,
+    { timeout: 5000 },
+  );
+  const distant = Number(await keys(page).getAttribute("data-first-white"));
+  assert(distant <= 51 && distant + 21 > 51, "平移后未显示按下的C8");
+  await widthIs(page, 21);
+  const releasedAt = await page.evaluate(() => {
+    rangeNote(108, 0);
+    return performance.now();
+  });
+  await page.waitForFunction(
+    (initial) => {
+      const host = document.querySelector(".free-play");
+      return (
+        Number(host.dataset.firstWhite) === initial &&
+        host.querySelector('[aria-label="上升音符"]').dataset.active === "0"
+      );
+    },
+    home,
+    { timeout: 5000 },
+  );
+  const elapsed = await page.evaluate(
+    (start) => performance.now() - start,
+    releasedAt,
+  );
+  assert(
+    elapsed >= 2000 && elapsed <= 5000,
+    `松开远音后返回时间异常：${elapsed}ms`,
+  );
+  const historyNotes = Number(await plot.getAttribute("data-notes"));
+  assert(historyNotes > previousNotes, "返回主音区时提前清除了上行音符历史");
+  const observations = await page.evaluate(
+    (start) => rangeProbe.observations.slice(start),
+    observationStart,
+  );
+  const counts = [...new Set(observations.map((entry) => entry.count))];
+  assert.deepEqual(counts, [21], "单个远音使键盘宽度发生变化");
+  return { home, distant, returnMs: Math.round(elapsed), historyNotes, counts };
+}
 async function importFixture(page) {
   await page.goto(base);
   await page.locator(".music-card").first().waitFor();
@@ -242,6 +298,7 @@ async function importFixture(page) {
     await mode(page, "free");
     await page.getByLabel("上升音符", { exact: true }).waitFor();
     await widthIs(page, 21);
+    report.freeSingleFarNoteReturns = await singleFarNoteReturns(page);
     await page.evaluate(() => {
       rangeNote(24, 100);
       rangeNote(108, 100);

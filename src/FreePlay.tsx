@@ -119,9 +119,7 @@ export default function FreePlay({
       const active = [...session.active.values()];
       const previous = viewport.range;
       const next = viewport.update(
-        (active.length ? active : session.notes.slice(-1)).map(
-          (note) => note.midi,
-        ),
+        active.map((note) => note.midi),
         current.current.minWhiteKeys,
         current.current.registerMode,
         now,
