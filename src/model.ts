@@ -56,8 +56,6 @@ export interface Settings {
   startBeat?: number;
   minWhiteKeys?: number;
   registerMode?: "follow" | "lock" | "full";
-  chordControls?: boolean;
-  chordRoot?: number;
   speed: number;
   hand: Hand;
   mode: "wait" | "rhythm" | "listen";

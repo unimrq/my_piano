@@ -18,6 +18,17 @@ function xmlDoc(text: string) {
       doc.documentElement.localName !== "container")
   )
     throw Error("不是有效的 MusicXML 文件（需要 score-partwise 格式）");
+  for (const element of doc.querySelectorAll("*")) {
+    if (
+      ["script", "iframe", "object", "embed", "foreignobject"].includes(
+        element.localName.toLowerCase(),
+      ) ||
+      Array.from(element.attributes).some((attribute) =>
+        /^on/i.test(attribute.localName),
+      )
+    )
+      throw Error("曲谱包含不允许的脚本或事件属性");
+  }
   return doc;
 }
 function measuresForMidi(midi: Midi, duration: number): Measure[] {
@@ -340,7 +351,7 @@ export function importScore(name: string, bytes: Uint8Array): Song {
     if (!container) throw Error("压缩曲谱缺少 container.xml");
     const doc = xmlDoc(new TextDecoder().decode(container));
     const root = doc.querySelector("rootfile")?.getAttribute("full-path");
-    if (!root || !files[root]) throw Error("压缩曲谱缺少主文件");
+    if (!root || !Object.hasOwn(files, root)) throw Error("压缩曲谱缺少主文件");
     return parseMusicXml(new TextDecoder().decode(files[root]), title);
   }
   if (ext === "xml" || ext === "musicxml")

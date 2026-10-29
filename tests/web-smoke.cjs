@@ -92,7 +92,19 @@ async function run(engine, name) {
         .then((text) => text.includes("刻在我心底的名字"))
     ) {
       const section = page.locator('.sheet-host [data-measure="21"]').first();
-      await section.scrollIntoViewIfNeeded();
+      // Existing scores now gain fingerings on entry, which replaces the SVG.
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".app")?.getAttribute("aria-busy") === "false",
+      );
+      await page.waitForFunction(
+        () => document.querySelectorAll(".sheet-host svg text").length > 100,
+      );
+      await section.evaluate((el) => {
+        const sheet = el.closest(".sheet");
+        sheet.scrollLeft +=
+          el.getBoundingClientRect().left - sheet.getBoundingClientRect().left;
+      });
       // VexFlow draws the triplet number directly, without a tuplet CSS group.
       const bar = section.locator(
         'xpath=ancestor::*[contains(@class,"vf-measure")][1]',
@@ -226,11 +238,11 @@ async function run(engine, name) {
       path: path.join(artifacts, `网页竖屏-${name}.png`),
     });
     await page.getByRole("button", { name: "曲库", exact: true }).tap();
-    const chooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "导入曲谱", exact: true }).tap();
-    await (
-      await chooser
-    ).setFiles({
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("button", { name: "导入曲谱", exact: true }).click(),
+    ]);
+    await chooser.setFiles({
       name: "网页测试.musicxml",
       mimeType: "application/xml",
       buffer: Buffer.from(

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import {
   defaults,
   newId,
-  practiceNotes,
   playbackNotes,
   roleNote,
   beatToSeconds,
@@ -13,7 +12,6 @@ import {
   type Result,
   type Role,
 } from "./model";
-import { ChordControls } from "./chordControls";
 import { Trainer } from "./trainer";
 import { MidiDevices } from "./midi";
 import { importScore } from "./importer";
@@ -60,6 +58,7 @@ export default function App() {
   const [handSize, setHandSize] = useState<HandSize>("M");
   const [autoFingers, setAutoFingers] = useState(true);
   const [fingerStatus, setFingerStatus] = useState("");
+  const fingerAttempts = useRef(new Set<string>());
   const [home, setHome] = useState(true);
   const [settingsTab, setSettingsTab] = useState<
     "practice" | "device" | "display"
@@ -291,17 +290,6 @@ export default function App() {
         const [status, key, value] = data;
         const code = status & 0xf0;
         const e = engine.current;
-        if (
-          (code === 0x90 || code === 0x80) &&
-          shortcuts.current.input(
-            key,
-            code === 0x90 && value > 0,
-            performance.now(),
-            shortcutEnabled.current,
-            settingsRef.current.chordRoot ?? 21,
-          )
-        )
-          return;
         if (code === 0x90 && value > 0) e.down(key, value, performance.now());
         else if (code === 0x80 || code === 0x90) e.up(key, performance.now());
         else if (code === 0xb0 && key === 64) e.pedal = value;
@@ -309,7 +297,6 @@ export default function App() {
       },
       () => {
         pause();
-        shortcuts.current.clear();
         engine.current.pedal = 0;
         setNotice("钢琴连接已断开，练习已暂停。重新连接后点击继续。");
       },
@@ -494,42 +481,6 @@ export default function App() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, []);
-  const actions = useRef({
-    start: () => {
-      void start();
-    },
-    reset: () => reset(),
-  });
-  actions.current = {
-    start: () => {
-      void start();
-    },
-    reset: () => reset(),
-  };
-  const shortcuts = useRef(new ChordControls());
-  const shortcutBlocked = practiceNotes(song, settings).some((n) =>
-    [0, 1, 2, 3, 6, 8].includes(n.midi - (settings.chordRoot ?? 21)),
-  );
-  const shortcutEnabled = useRef(false);
-  shortcutEnabled.current =
-    !home &&
-    !panel &&
-    !pending &&
-    (settings.chordControls ?? true) &&
-    !shortcutBlocked;
-  useEffect(() => {
-    shortcuts.current.clear();
-  }, [home, panel, pending, settings.chordRoot, settings.chordControls]);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const action = shortcuts.current.poll(performance.now());
-      if (action && shortcutEnabled.current) {
-        if (action === "toggle") actions.current.start();
-        else if (!engine.current.running) actions.current.reset();
-      }
-    }, 40);
-    return () => clearInterval(timer);
-  }, []);
   function enableAudio() {
     const Context =
       window.AudioContext ??
@@ -652,6 +603,20 @@ export default function App() {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (
+      home ||
+      !ready ||
+      busy ||
+      !song.notes.length ||
+      song.notes.some((n) => n.finger) ||
+      /<fingering[\s>]/.test(song.xml) ||
+      fingerAttempts.current.has(song.id)
+    )
+      return;
+    fingerAttempts.current.add(song.id);
+    void addFingers();
+  }, [home, ready, busy, song]);
   const e = engine.current,
     m = song.measures.findLast((m) => m.beat <= e.beat);
   const currentTempo =
@@ -662,7 +627,10 @@ export default function App() {
     outs = devices.current?.outputs() ?? [];
 
   return (
-    <div className={home ? "app web-app" : "app web-app practice-focus"}>
+    <div
+      className={home ? "app web-app" : "app web-app practice-focus"}
+      aria-busy={busy}
+    >
       {home && (
         <LibraryHome
           library={library}
@@ -747,12 +715,7 @@ export default function App() {
           <button
             className="primary"
             onClick={() => void start()}
-            disabled={!ready}
-            title={
-              shortcutBlocked
-                ? "此曲已停用和弦操作"
-                : `和弦 ${[0, 1, 6].map((n) => pitchName((settings.chordRoot ?? 21) + n)).join(" + ")} 按住一秒`
-            }
+            disabled={!ready || busy}
           >
             <Icon name={e.running ? "pause" : "play"} />
             {e.running ? "暂停" : activeMs.current && !e.done ? "继续" : "开始"}
@@ -1196,56 +1159,6 @@ export default function App() {
                         />
                       </label>
                     </section>
-                    <details className="settings-advanced">
-                      <summary>钢琴快捷操作</summary>
-
-                      <label className="field check">
-                        <input
-                          type="checkbox"
-                          checked={settings.chordControls ?? true}
-                          onChange={(v) =>
-                            displaySettings({ chordControls: v.target.checked })
-                          }
-                        />
-                        启用和弦快捷操作
-                      </label>
-                      <label className="field">
-                        快捷音区
-                        <select
-                          value={settings.chordRoot ?? 21}
-                          onChange={(v) =>
-                            displaySettings({
-                              chordRoot: Number(v.target.value),
-                            })
-                          }
-                        >
-                          {[21, 33, 45].map((n) => (
-                            <option key={n} value={n}>
-                              {pitchName(n)} 起
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <p className="muted">
-                        开始 / 暂停：
-                        {[0, 1, 6]
-                          .map((n) => pitchName((settings.chordRoot ?? 21) + n))
-                          .join(" + ")}
-                        <br />
-                        重来：
-                        {[2, 3, 8]
-                          .map((n) => pitchName((settings.chordRoot ?? 21) + n))
-                          .join(" + ")}
-                        （暂停时）
-                        <br />
-                        按住一秒，松开后可再次触发。
-                      </p>
-                      {shortcutBlocked && (
-                        <p className="hint">
-                          此曲使用了保留音，和弦操作已停用。
-                        </p>
-                      )}
-                    </details>
                     <details className="settings-advanced">
                       <summary>声部分配</summary>
                       {song.tracks.map((t) => (

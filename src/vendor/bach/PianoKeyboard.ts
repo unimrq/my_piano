@@ -325,6 +325,24 @@ export class PianoKeyboard {
     const mode = this.opts.noteLabelMode ?? "none";
     if (mode === "none") return "";
     const white = isWhite(midi);
+    if (mode === "numbers") {
+      if (!white) return "";
+      const number = [
+        "1",
+        "♯1",
+        "2",
+        "♯2",
+        "3",
+        "4",
+        "♯4",
+        "5",
+        "♯5",
+        "6",
+        "♯6",
+        "7",
+      ][midi % 12];
+      return `${number}\n${midiToNoteName(midi, this.opts.useFlats)}`;
+    }
     if (mode === "c_only") {
       // Show full pitch (e.g. "C4") only for C notes
       return midi % 12 === 0 ? midiToPitch(midi, this.opts.useFlats) : "";

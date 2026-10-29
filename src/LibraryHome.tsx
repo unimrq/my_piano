@@ -226,23 +226,21 @@ export default function LibraryHome({
                   }}
                   className={`music-card category-${s.category === "古典" ? "classic" : s.category === "基本功" ? "study" : "folk"}`}
                 >
-                  <div className="card-art">
-                    <button
-                      aria-label={`收藏 ${s.title}`}
-                      className={
-                        favorite.has(s.id) ? "favorite active" : "favorite"
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onFavorite(s);
-                      }}
-                    >
-                      <Icon name="heart" />
-                    </button>
-                  </div>
                   <div className="card-body">
                     <div className="card-title">
                       <button onClick={() => onChoose(s)}>{s.title}</button>
+                      <button
+                        aria-label={`收藏 ${s.title}`}
+                        className={
+                          favorite.has(s.id) ? "favorite active" : "favorite"
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onFavorite(s);
+                        }}
+                      >
+                        <Icon name="heart" />
+                      </button>
                     </div>
                     <p>{s.composer ?? "传统旋律"}</p>
                     <div className="card-meta">
@@ -251,7 +249,9 @@ export default function LibraryHome({
                       </span>
                       <span>{s.measures.length} 小节</span>
                       <span>{duration(s)}</span>
-                      {s.warning?.startsWith("自动转谱") && <span>自动转谱</span>}
+                      {s.warning?.startsWith("自动转谱") && (
+                        <span>自动转谱</span>
+                      )}
                       {best !== null && (
                         <span className="card-best">最佳 {best}%</span>
                       )}

@@ -97,7 +97,7 @@ export default function Roll({
     const keys = new PianoKeyboard(keyCanvas.current, {
       width,
       height: keyHeight(),
-      noteLabelMode: "c_only",
+      noteLabelMode: "numbers",
       pianoTheme: "white",
       showFingering: false,
       showHandColors: true,

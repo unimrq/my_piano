@@ -100,16 +100,61 @@ export default function Sheet({
       drawPartNames: false,
       drawPartAbbreviations: false,
       drawMeasureNumbers: true,
+      fingeringPosition: "below",
+      drawFingerings: true,
+      fingeringInsideStafflines: false,
       followCursor: false,
       drawingParameters: "compacttight",
       renderSingleHorizontalStaffline: true,
     });
     api.current = display;
+    display.EngravingRules.FingeringPositionFromXML = false;
     let timer: ReturnType<typeof setTimeout>;
+    const alignFingerings = () => {
+      const rows = new Map<number, SVGTextElement[][]>();
+      for (const measure of display.GraphicSheet.MeasureList)
+        measure.forEach((staff, index) => {
+          for (const entry of staff.staffEntries) {
+            const labels = entry.FingeringEntries.flatMap((label) => {
+              const node = label.SVGNode;
+              const text =
+                node instanceof SVGTextElement
+                  ? node
+                  : node instanceof Element
+                    ? node.querySelector<SVGTextElement>("text")
+                    : null;
+              return text ? [text] : [];
+            });
+            if (!labels.length) continue;
+            const row = rows.get(index) ?? [];
+            row.push(labels);
+            rows.set(index, row);
+          }
+        });
+      for (const [index, entries] of rows) {
+        const baseline = Math.max(
+          ...entries.flat().map((text) => Number(text.getAttribute("y"))),
+        );
+        for (const labels of entries) {
+          const offset =
+            baseline -
+            Math.max(...labels.map((text) => Number(text.getAttribute("y"))));
+          // Preserve stacked chord fingerings; align their bottom digit with the row.
+          for (const text of labels) {
+            text.setAttribute(
+              "y",
+              String(Number(text.getAttribute("y")) + offset),
+            );
+            text.dataset.fingeringRow = String(index);
+          }
+        }
+      }
+    };
     const render = () => {
       if (disposed) return;
       display.Zoom = 1;
       display.render();
+      alignFingerings();
       const available = surface.current!.parentElement!.clientHeight - 24;
       const height = host
         .current!.querySelector("svg")!
@@ -117,6 +162,7 @@ export default function Sheet({
       if (Math.abs(height - available) > 2) {
         display.Zoom = Math.max(0.05, Math.min(2, available / height));
         display.render();
+        alignFingerings();
       }
       const cursor = display.cursor;
       cursor.reset();

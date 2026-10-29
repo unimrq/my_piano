@@ -175,3 +175,24 @@ describe("离线导入", () => {
     expect(s.tempos.at(-1)).toEqual({ beat: 4, bpm: 120 });
   });
 });
+it("拒绝实体展开、脚本和事件属性，包括带命名空间的脚本", () => {
+  const attacks = [
+    "<script>alert(1)</script>",
+    '<evil:script xmlns:evil="urn:evil">alert(1)</evil:script>',
+    '<direction onload="alert(1)"/>',
+    "<foreignObject><iframe/></foreignObject>",
+  ];
+  for (const payload of attacks)
+    expect(() =>
+      parseMusicXml(
+        score.replace("</measure>", payload + "</measure>"),
+        "恶意曲谱",
+      ),
+    ).toThrow(/脚本|事件/);
+  expect(() =>
+    parseMusicXml(
+      '<!DOCTYPE score-partwise [<!ENTITY x "payload">]>' + score,
+      "实体",
+    ),
+  ).toThrow(/实体/);
+});
