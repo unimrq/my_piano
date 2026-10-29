@@ -8,18 +8,20 @@ export default function FreePlay({
   minWhiteKeys = 21,
   split = 60,
   registerMode = "follow",
+  paused = false,
 }: {
   session: FreePlaySession;
   minWhiteKeys?: number;
   split?: number;
   registerMode?: "follow" | "lock" | "full";
+  paused?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null),
     surface = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
     keyCanvas = useRef<HTMLCanvasElement>(null);
-  const current = useRef({ minWhiteKeys, split, registerMode });
-  current.current = { minWhiteKeys, split, registerMode };
+  const current = useRef({ minWhiteKeys, split, registerMode, paused });
+  current.current = { minWhiteKeys, split, registerMode, paused };
   const [error, setError] = useState("");
   useEffect(() => {
     const holder = host.current!,
@@ -34,6 +36,7 @@ export default function FreePlay({
       keyHeight = 180,
       low = 16,
       count = 21;
+    let pausedAt: number | null = null;
     const viewport = new KeyboardRange([16, 37]);
     const held = new Set<number>();
     const keys = new PianoKeyboard(input, {
@@ -44,13 +47,30 @@ export default function FreePlay({
       showFingering: false,
       showHandColors: true,
       useFlats: false,
-      onKeyPress: (m) => session.input([144, m, 96], performance.now() / 1000),
-      onKeyRelease: (m) => session.input([128, m, 0], performance.now() / 1000),
+      onKeyPress: (m) => {
+        if (!current.current.paused)
+          session.input([144, m, 96], performance.now() / 1000);
+      },
+      onKeyRelease: (m) => {
+        if (!current.current.paused)
+          session.input([128, m, 0], performance.now() / 1000);
+      },
+      onPan: (delta, active) => {
+        holder.toggleAttribute("data-panning", active);
+        if (!delta) return;
+        [low] = viewport.pan(
+          (-delta * count) / holder.clientWidth,
+          performance.now() / 1000,
+        );
+        holder.dataset.firstWhite = String(low);
+        content.style.transform = `translateX(${(-low * 100) / 52}%)`;
+      },
     });
     const layout = () => {
       [low] = viewport.range;
-      count = viewport.range[1] - low;
+      count = Math.round(viewport.range[1] - low);
       holder.dataset.visibleWhites = String(count);
+      holder.dataset.firstWhite = String(low);
       content.style.width = `${5200 / count}%`;
       content.style.transform = `translateX(${(-low * 100) / 52}%)`;
       width = (holder.clientWidth * 52) / count;
@@ -68,7 +88,17 @@ export default function FreePlay({
     };
     const animate = () => {
       if (disposed) return;
-      const now = performance.now() / 1000;
+      const realNow = performance.now() / 1000;
+      if (current.current.paused) pausedAt ??= realNow;
+      else if (pausedAt !== null) {
+        const elapsed = realNow - pausedAt;
+        for (const note of session.notes) {
+          note.start += elapsed;
+          if (note.end !== undefined) note.end += elapsed;
+        }
+        pausedAt = null;
+      }
+      const now = pausedAt ?? realNow;
       session.prune(now);
       const active = [...session.active.values()];
       const recent = session.notes.filter(
@@ -84,9 +114,10 @@ export default function FreePlay({
         now,
       );
       if (next !== previous) {
-        if (next[1] - next[0] !== count) layout();
+        if (Math.round(next[1] - next[0]) !== count) layout();
         else {
           [low] = next;
+          holder.dataset.firstWhite = String(low);
           content.style.transform = `translateX(${(-low * 100) / 52}%)`;
         }
       }

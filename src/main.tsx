@@ -14,6 +14,6 @@ if (
   "serviceWorker" in navigator
 ) {
   navigator.serviceWorker
-    .register("./sw.js")
+    .register("./sw.js", { updateViaCache: "none" })
     .catch((error) => console.warn("离线缓存尚未启用", error));
 }

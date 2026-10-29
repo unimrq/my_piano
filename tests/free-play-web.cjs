@@ -67,8 +67,8 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
       assert.equal(await page.locator(".song-name").textContent(), title);
       await page.locator(".sheet-host svg").first().waitFor();
       assert.equal(
-        await page.getByRole("button", { name: "开始", exact: true }).count(),
-        0,
+        await page.getByRole("button", { name: "暂停", exact: true }).count(),
+        1,
       );
       await page.getByTitle("更多设置", { exact: true }).click();
       assert.equal(

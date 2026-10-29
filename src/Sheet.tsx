@@ -338,6 +338,10 @@ export default function Sheet({
     };
   }, [xml]);
   useEffect(() => {
+    position.current = -1;
+    manualUntil.current = 0;
+  }, [trainer]);
+  useEffect(() => {
     const display = api.current;
     if (!display?.Sheet || !display.cursor?.Iterator) return;
     const target = Math.max(0, beat) / 4;
@@ -368,7 +372,7 @@ export default function Sheet({
       (trainer.running || firstPosition)
     )
       scroll.scrollLeft = Math.max(0, anchor.x - scroll.clientWidth * 0.35);
-  }, [beat, renderVersion, trainer.running, anchors]);
+  }, [beat, renderVersion, trainer, trainer.running, anchors]);
   useEffect(() => {
     const rect = surface.current?.getBoundingClientRect();
     if (!rect) return;

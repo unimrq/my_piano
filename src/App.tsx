@@ -58,6 +58,10 @@ const initial = (): Library => ({
 });
 export default function App() {
   const freeSession = useRef(new FreePlaySession());
+  const [freePaused, setFreePaused] = useState(false);
+  const freePausedRef = useRef(freePaused);
+  freePausedRef.current = freePaused;
+  const playback = useRef({ enabled: false, toggle: () => {} });
   const [handSize, setHandSize] = useState<HandSize>("M");
   const [autoFingers, setAutoFingers] = useState(true);
   const [fingerStatus, setFingerStatus] = useState("");
@@ -132,6 +136,7 @@ export default function App() {
   };
   const pause = () => {
     freeSession.current.release(performance.now() / 1000);
+    if (settingsRef.current.mode === "free") setFreePaused(true);
     engine.current.pause();
     resetOutput();
     refresh((v) => v + 1);
@@ -139,6 +144,7 @@ export default function App() {
   const reset = (s = song, config = settings) => {
     pause();
     freeSession.current.clear();
+    setFreePaused(false);
     engine.current = new Trainer(s, config);
     activeMs.current = 0;
     lastClick.current = -999;
@@ -157,6 +163,18 @@ export default function App() {
       if (event.key === "F11") {
         event.preventDefault();
         void fullscreen();
+      }
+      if (
+        (event.code === "Space" || event.key === " ") &&
+        !homeRef.current &&
+        playback.current.enabled &&
+        !(
+          event.target instanceof Element &&
+          event.target.closest("input,textarea,select,[contenteditable=true]")
+        )
+      ) {
+        event.preventDefault();
+        if (!event.repeat) playback.current.toggle();
       }
     };
     const changed = () => setFull(!!browserFullscreenElement());
@@ -331,7 +349,8 @@ export default function App() {
       () => devicesChanged((v) => v + 1),
       (data) => {
         if (settingsRef.current.mode === "free" && !homeRef.current) {
-          freeSession.current.input(data, performance.now() / 1000);
+          if (!freePausedRef.current)
+            freeSession.current.input(data, performance.now() / 1000);
           return;
         }
         const [status, key, value] = data;
@@ -345,7 +364,7 @@ export default function App() {
       () => {
         pause();
         engine.current.pedal = 0;
-        setNotice("钢琴连接已断开，练习已暂停。重新连接后点击继续。");
+        setNotice("钢琴连接已断开，练习已暂停。重新连接后点击播放。");
       },
     );
     devices.current = midi;
@@ -545,16 +564,15 @@ export default function App() {
     }
   }
   async function start() {
-    if (settings.mode === "free") return;
+    if (settings.mode === "free") {
+      if (freePaused) setFreePaused(false);
+      else pause();
+      return;
+    }
     setError("");
     const e = engine.current;
     if (e.running) {
       pause();
-      return;
-    }
-    if (settings.mode !== "listen" && !devices.current?.input) {
-      setNotice("请先在设备设置中连接并选择钢琴输入。");
-      setPanel("settings");
       return;
     }
     if (settings.mode !== "listen" && !e.notes.length) {
@@ -567,7 +585,7 @@ export default function App() {
       return;
     }
     if (e.done) {
-      reset();
+      restart();
     }
     await enableAudio();
     if (activeMs.current === 0) startedAt.current = performance.now();
@@ -576,6 +594,17 @@ export default function App() {
     setNotice("");
     refresh((v) => v + 1);
   }
+  const restart = () =>
+    configure({
+      from: 1,
+      to: song.measures.length,
+      startBeat: undefined,
+      loop: false,
+    });
+  playback.current = {
+    enabled: ready && !busy && !preparingScore && !panel,
+    toggle: () => void start(),
+  };
   async function importFile(file: { name: string; bytes: number[] }) {
     setBusy(true);
     setError("");
@@ -763,19 +792,7 @@ export default function App() {
                   <Icon name="metronome" />
                 </button>
               </div>
-              <button
-                className="primary"
-                onClick={() => void start()}
-                disabled={!ready || busy}
-              >
-                <Icon name={e.running ? "pause" : "play"} />
-                {e.running
-                  ? "暂停"
-                  : activeMs.current && !e.done
-                    ? "继续"
-                    : "开始"}
-              </button>
-              <button onClick={() => reset()} title="从头重来">
+              <button onClick={restart} title="回到第一小节">
                 <Icon name="restart" />
                 重来
               </button>
@@ -802,6 +819,17 @@ export default function App() {
           <button onClick={() => void fullscreen()} title="全屏 / Esc 退出">
             <Icon name={full ? "collapse" : "expand"} />
             {full ? "退出全屏" : "全屏"}
+          </button>
+          <button
+            className="primary playback-toggle"
+            onClick={() => void start()}
+            disabled={!ready || busy || preparingScore}
+            title="播放 / 暂停（空格）"
+          >
+            <Icon
+              name={(freePlay ? !freePaused : e.running) ? "pause" : "play"}
+            />
+            {(freePlay ? !freePaused : e.running) ? "暂停" : "播放"}
           </button>
           <button
             className="icon-button"
@@ -888,6 +916,7 @@ export default function App() {
           {freePlay ? (
             <FreePlay
               session={freeSession.current}
+              paused={freePaused}
               minWhiteKeys={settings.minWhiteKeys}
               split={settings.split}
               registerMode={settings.registerMode}

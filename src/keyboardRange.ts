@@ -6,12 +6,22 @@ export class KeyboardRange {
   private layout = "";
   private movedAt = -Infinity;
   private narrowSince: number | undefined;
+  private manualUntil = -Infinity;
 
   constructor(public range: [number, number] = [21, 42]) {}
 
   reset() {
     this.layout = "";
     this.narrowSince = undefined;
+    this.manualUntil = -Infinity;
+  }
+  pan(whiteKeys: number, now: number) {
+    const count = Math.round(this.range[1] - this.range[0]);
+    const left = Math.max(0, Math.min(52 - count, this.range[0] + whiteKeys));
+    this.range = [left, left + count];
+    this.manualUntil = now + 8;
+    this.narrowSince = undefined;
+    return this.range;
   }
 
   update(
@@ -25,6 +35,7 @@ export class KeyboardRange {
     const changed = layout !== this.layout;
     this.layout = layout;
     const [left, right] = this.range;
+    const currentCount = Math.round(right - left);
     const center = (low: number, high: number, count: number) =>
       Math.max(
         0,
@@ -35,7 +46,7 @@ export class KeyboardRange {
         this.range = [begin, begin + count];
         this.movedAt = now;
       }
-      if (count !== right - left || changed) this.narrowSince = undefined;
+      if (count !== currentCount || changed) this.narrowSince = undefined;
       return this.range;
     };
     if (mode === "full") return move(0, 52);
@@ -43,6 +54,7 @@ export class KeyboardRange {
       return changed
         ? move(center(left, right - 1, minimum), minimum)
         : this.range;
+    if (!changed && now < this.manualUntil) return this.range;
     if (!pitches.length)
       return changed
         ? move(center(left, right - 1, minimum), minimum)
@@ -61,12 +73,12 @@ export class KeyboardRange {
       return move(center(low, high, count), count);
 
     // Use elapsed real time: wait mode and seeking must not freeze zoom recovery.
-    if (count < right - left) this.narrowSince ??= now;
+    if (count < currentCount) this.narrowSince ??= now;
     else this.narrowSince = undefined;
     if (this.narrowSince !== undefined && now - this.narrowSince >= 3)
       return move(center(low, high, count), count);
     if ((low < left + 2 || high >= right - 2) && now - this.movedAt >= 2.5)
-      return move(center(low, high, right - left), right - left);
+      return move(center(low, high, currentCount), currentCount);
     return this.range;
   }
 }

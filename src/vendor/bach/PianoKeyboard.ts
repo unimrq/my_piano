@@ -11,10 +11,11 @@ const MIDI_MAX = 108; // C8
 function isWhite(midi: number) {
   return !isBlackKey(midi);
 }
-const WHITE_COUNT = Array.from(
+const WHITE_KEYS = Array.from(
   { length: MIDI_MAX - MIDI_MIN + 1 },
   (_, i) => MIDI_MIN + i,
-).filter(isWhite).length;
+).filter(isWhite);
+const WHITE_COUNT = WHITE_KEYS.length;
 
 // ── Color tokens ──────────────────────────────────────────────────────────────
 const C_LABEL = 0x8b919c;
@@ -35,6 +36,7 @@ export interface PianoKeyboardOptions {
   customColors?: CustomColors;
   onKeyPress?: (midi: number) => void;
   onKeyRelease?: (midi: number) => void;
+  onPan?: (deltaX: number, active: boolean) => void;
 }
 
 interface KeyState {
@@ -45,6 +47,14 @@ interface KeyState {
   hand: "left" | "right" | null;
   finger: number | null;
   hovered: boolean;
+}
+interface KeyPointer {
+  midi?: number;
+  startX: number;
+  lastX: number;
+  panning: boolean;
+  pressed: boolean;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 // ── Main class ────────────────────────────────────────────────────────────────
@@ -65,20 +75,84 @@ export class PianoKeyboard {
   private blackH = 0;
   private keyX = new Map<number, number>();
 
-  // Drag-to-play tracking
-  private isPointerDown = false;
-  private dragKeys = new Set<number>();
-  private readonly onWindowPointerUp: (e: PointerEvent) => void;
+  private pointers = new Map<number, KeyPointer>();
+  private activatePointer(pointer: KeyPointer) {
+    clearTimeout(pointer.timer);
+    if (pointer.pressed || pointer.panning || pointer.midi === undefined)
+      return;
+    if (
+      ![...this.pointers.values()].some(
+        (other) => other.pressed && other.midi === pointer.midi,
+      )
+    )
+      this.opts.onKeyPress?.(pointer.midi);
+    pointer.pressed = true;
+  }
+  private readonly onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    const box = this.canvas.getBoundingClientRect();
+    const x = ((event.clientX - box.left) * this.opts.width) / box.width;
+    const y = ((event.clientY - box.top) * this.opts.height) / box.height;
+    const black =
+      y < this.blackH
+        ? [...this.keyX].find(
+            ([midi, left]) =>
+              !isWhite(midi) && x >= left && x < left + this.blackW,
+          )?.[0]
+        : undefined;
+    const pointer: KeyPointer = {
+      midi: black ?? WHITE_KEYS[Math.floor(x / this.whiteW)],
+      startX: event.clientX,
+      lastX: event.clientX,
+      panning: false,
+      pressed: false,
+    };
+    this.pointers.set(event.pointerId, pointer);
+    pointer.timer = setTimeout(() => this.activatePointer(pointer), 350);
+    this.canvas.setPointerCapture(event.pointerId);
+    this.canvas.focus({ preventScroll: true });
+    event.preventDefault();
+  };
+  private readonly onPointerMove = (event: PointerEvent) => {
+    const pointer = this.pointers.get(event.pointerId);
+    if (!pointer || !this.opts.onPan || this.pointers.size > 1) return;
+    if (!pointer.panning && Math.abs(event.clientX - pointer.startX) < 8)
+      return;
+    if (!pointer.panning) {
+      clearTimeout(pointer.timer);
+      if (pointer.pressed && pointer.midi !== undefined)
+        this.opts.onKeyRelease?.(pointer.midi);
+      pointer.pressed = false;
+      pointer.panning = true;
+    }
+    this.opts.onPan(event.clientX - pointer.lastX, true);
+    pointer.lastX = event.clientX;
+  };
+  private readonly onWindowPointerUp = (event: PointerEvent) => {
+    const pointer = this.pointers.get(event.pointerId);
+    if (!pointer) return;
+    clearTimeout(pointer.timer);
+    if (pointer.panning) this.opts.onPan?.(0, false);
+    else if (event.type === "pointerup")
+      for (const pending of this.pointers.values())
+        this.activatePointer(pending);
+    this.pointers.delete(event.pointerId);
+    if (
+      pointer.pressed &&
+      pointer.midi !== undefined &&
+      ![...this.pointers.values()].some(
+        (other) => other.pressed && other.midi === pointer.midi,
+      )
+    )
+      this.opts.onKeyRelease?.(pointer.midi);
+  };
 
-  constructor(_canvas: HTMLCanvasElement, opts: PianoKeyboardOptions) {
+  constructor(
+    private canvas: HTMLCanvasElement,
+    opts: PianoKeyboardOptions,
+  ) {
     this.opts = opts;
     this.app = new PIXI.Application();
-    this.onWindowPointerUp = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      this.isPointerDown = false;
-      for (const m of this.dragKeys) this.opts.onKeyRelease?.(m);
-      this.dragKeys.clear();
-    };
   }
 
   async init(canvas: HTMLCanvasElement) {
@@ -93,6 +167,10 @@ export class PianoKeyboard {
       ...(import.meta.env.DEV ? { preserveDrawingBuffer: true } : {}),
     });
     window.addEventListener("pointerup", this.onWindowPointerUp);
+    window.addEventListener("pointercancel", this.onWindowPointerUp);
+    canvas.addEventListener("pointerdown", this.onPointerDown);
+    canvas.addEventListener("pointermove", this.onPointerMove);
+    canvas.tabIndex = 0;
     this.computeLayout();
     this.drawKeys();
     this._initialized = true;
@@ -183,19 +261,7 @@ export class PianoKeyboard {
       container.addChild(fingerText);
       this.fingerLabels.set(midi, fingerText);
 
-      // Click + drag-to-play handlers
-      container.on("pointerdown", () => {
-        this.isPointerDown = true;
-        if (!this.dragKeys.has(midi)) {
-          this.opts.onKeyPress?.(midi);
-          this.dragKeys.add(midi);
-        }
-      });
       container.on("pointerover", () => {
-        if (this.isPointerDown && !this.dragKeys.has(midi)) {
-          this.opts.onKeyPress?.(midi);
-          this.dragKeys.add(midi);
-        }
         // Hover highlight
         const st = this.keyStates.get(midi);
         if (st && !st.hovered) {
@@ -204,10 +270,6 @@ export class PianoKeyboard {
         }
       });
       container.on("pointerout", () => {
-        if (this.dragKeys.has(midi)) {
-          this.opts.onKeyRelease?.(midi);
-          this.dragKeys.delete(midi);
-        }
         // Remove hover highlight
         const st = this.keyStates.get(midi);
         if (st && st.hovered) {
@@ -341,7 +403,7 @@ export class PianoKeyboard {
         "♯6",
         "7",
       ][midi % 12];
-      return `${number}\n${midiToNoteName(midi, this.opts.useFlats)}`;
+      return `${number}\n${midi % 12 === 0 ? midiToPitch(midi, this.opts.useFlats) : midiToNoteName(midi, this.opts.useFlats)}`;
     }
     if (mode === "c_only") {
       // Show full pitch (e.g. "C4") only for C notes
@@ -473,6 +535,16 @@ export class PianoKeyboard {
 
   destroy() {
     window.removeEventListener("pointerup", this.onWindowPointerUp);
+    window.removeEventListener("pointercancel", this.onWindowPointerUp);
+    this.canvas.removeEventListener("pointerdown", this.onPointerDown);
+    this.canvas.removeEventListener("pointermove", this.onPointerMove);
+    for (const pointer of this.pointers.values()) {
+      clearTimeout(pointer.timer);
+      if (pointer.pressed && pointer.midi !== undefined)
+        this.opts.onKeyRelease?.(pointer.midi);
+    }
+    this.pointers.clear();
+    this.opts.onPan?.(0, false);
     if (this._initialized) {
       this.app.destroy(false, { children: true });
     }

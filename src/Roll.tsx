@@ -56,6 +56,7 @@ export default function Roll({
   notesRef.current = notes;
   useEffect(() => {
     if (!host.current || !rollCanvas.current || !keyCanvas.current) return;
+    const holder = host.current;
     let disposed = false,
       frame = 0;
     const width = surface.current!.clientWidth;
@@ -96,6 +97,24 @@ export default function Roll({
       showHandColors: true,
       useFlats: false,
       customColors: colors,
+      onKeyPress: (midi) =>
+        latest.current.trainer.down(midi, 96, performance.now()),
+      onKeyRelease: (midi) =>
+        latest.current.trainer.up(midi, performance.now()),
+      onPan: (delta, active) => {
+        holder.toggleAttribute("data-panning", active);
+        if (delta)
+          setRange(
+            viewport.current.pan(
+              (-delta *
+                Math.round(
+                  viewport.current.range[1] - viewport.current.range[0],
+                )) /
+                holder.clientWidth,
+              performance.now() / 1000,
+            ),
+          );
+      },
     });
     Promise.all([
       falling.init(rollCanvas.current),
@@ -247,7 +266,8 @@ export default function Roll({
     <div
       ref={host}
       className="roll-keyboard upstream-renderer"
-      data-visible-whites={range[1] - range[0]}
+      data-visible-whites={Math.round(range[1] - range[0])}
+      data-first-white={range[0]}
     >
       <div
         ref={surface}

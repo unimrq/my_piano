@@ -255,7 +255,7 @@ async function run(engine, name) {
     await page.getByLabel("练习双手", { exact: true }).selectOption("right");
     await page.locator(".panel-heading button").tap();
     await page.evaluate(() => (window.sent = []));
-    await page.getByRole("button", { name: "开始", exact: true }).tap();
+    await page.getByRole("button", { name: "播放", exact: true }).tap();
     await page.waitForTimeout(100);
     await page.evaluate(() => {
       for (const midi of [60, 62, 64]) {

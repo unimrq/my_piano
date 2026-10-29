@@ -1187,6 +1187,15 @@ h3 {
 .roll-surface canvas {
   flex-shrink: 0;
 }
+.upstream-keys {
+  touch-action: none;
+}
+.roll-keyboard[data-panning] .roll-surface {
+  transition: none;
+}
+.roll-keyboard[data-panning] canvas {
+  cursor: grabbing !important;
+}
 
 /* Neutral dark surfaces: keep chroma in note guidance and active controls. */
 :root {

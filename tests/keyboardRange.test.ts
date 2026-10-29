@@ -1,6 +1,17 @@
 import { expect, it } from "vitest";
 import { KeyboardRange, pianoWhites } from "../src/keyboardRange";
 const width = (range: [number, number]) => range[1] - range[0];
+it("手动拖动保持键宽、限制边界，并暂缓自动跟随", () => {
+  const view = new KeyboardRange();
+  const initial = view.update([60, 64], 21, "follow", 0);
+  const moved = view.pan(5.5, 1);
+  expect(moved[0]).toBe(initial[0] + 5.5);
+  expect(Math.round(width(moved))).toBe(21);
+  expect(view.update([21], 21, "follow", 2)).toBe(moved);
+  expect(view.update([21], 21, "follow", 10)[0]).toBe(0);
+  expect(view.pan(100, 11)).toEqual([31, 52]);
+  expect(view.pan(-100, 12)).toEqual([0, 21]);
+});
 
 it("大跨度立即纳入全部琴键，稳定窄音区三秒后恢复放大", () => {
   const view = new KeyboardRange();

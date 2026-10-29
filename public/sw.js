@@ -32,11 +32,18 @@ self.addEventListener("fetch", (event) => {
         event.request.mode === "navigate"
           ? new Request(new URL("index.html", self.registration.scope))
           : event.request;
-      return (
+      const cached =
         (await cache.match(request, { ignoreSearch: true })) ||
-        (await caches.match(request)) ||
-        fetch(event.request)
-      );
+        (await caches.match(request));
+      if (event.request.mode === "navigate") {
+        try {
+          const response = await fetch(event.request);
+          return response.ok ? response : cached || response;
+        } catch {
+          return cached || Response.error();
+        }
+      }
+      return cached || fetch(event.request);
     })(),
   );
 });
