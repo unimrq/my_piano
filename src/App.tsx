@@ -20,6 +20,8 @@ import { generateFingering } from "./fingering";
 import type { HandSize } from "./vendor/pianoplayer";
 import Sheet from "./Sheet";
 import Roll from "./Roll";
+import FreePlay from "./FreePlay";
+import { FreePlaySession } from "./freeSession";
 import LibraryHome from "./LibraryHome";
 import Icon from "./Icon";
 import {
@@ -55,6 +57,10 @@ const initial = (): Library => ({
   lastSong: "loading",
 });
 export default function App() {
+  const [freePlay, setFreePlay] = useState(false);
+  const freeMode = useRef(false);
+  freeMode.current = freePlay;
+  const freeSession = useRef(new FreePlaySession());
   const [handSize, setHandSize] = useState<HandSize>("M");
   const [autoFingers, setAutoFingers] = useState(true);
   const [fingerStatus, setFingerStatus] = useState("");
@@ -119,6 +125,7 @@ export default function App() {
     played.current.clear();
   };
   const pause = () => {
+    freeSession.current.release(performance.now() / 1000);
     engine.current.pause();
     resetOutput();
     refresh((v) => v + 1);
@@ -184,6 +191,7 @@ export default function App() {
     }));
   };
   const choose = (s: Song) => {
+    setFreePlay(false);
     setLibrary((l) => ({
       ...l,
       songs: l.songs.some((item) => item.id === s.id)
@@ -287,6 +295,10 @@ export default function App() {
     const midi = new MidiDevices(
       () => devicesChanged((v) => v + 1),
       (data) => {
+        if (freeMode.current) {
+          freeSession.current.input(data, performance.now() / 1000);
+          return;
+        }
         const [status, key, value] = data;
         const code = status & 0xf0;
         const e = engine.current;
@@ -605,6 +617,7 @@ export default function App() {
   }
   useEffect(() => {
     if (
+      freePlay ||
       home ||
       !ready ||
       busy ||
@@ -616,7 +629,7 @@ export default function App() {
       return;
     fingerAttempts.current.add(song.id);
     void addFingers();
-  }, [home, ready, busy, song]);
+  }, [freePlay, home, ready, busy, song]);
   const e = engine.current,
     m = song.measures.findLast((m) => m.beat <= e.beat);
   const currentTempo =
@@ -634,6 +647,14 @@ export default function App() {
       {home && (
         <LibraryHome
           library={library}
+          onFreePlay={() => {
+            pause();
+            freeSession.current.clear();
+            setResult(null);
+            setFreePlay(true);
+            setHome(false);
+            setPanel(null);
+          }}
           onChoose={choose}
           onFavorite={(s) =>
             setLibrary((l) => ({
@@ -663,83 +684,100 @@ export default function App() {
           onClick={() => {
             pause();
             setHome(true);
+            setFreePlay(false);
             setPanel(null);
           }}
         >
           <Icon name="back" />
           曲库
         </button>
-        <button
-          className="song-button"
-          onClick={() => setPanel(panel === "library" ? null : "library")}
-          title="打开曲库"
-        >
-          <span className="song-name">{song.title}</span>
-          <Icon name="chevron" />
-        </button>
+        {freePlay ? (
+          <span className="song-button song-name">自由练习</span>
+        ) : (
+          <button
+            className="song-button"
+            onClick={() => setPanel(panel === "library" ? null : "library")}
+            title="打开曲库"
+          >
+            <span className="song-name">{song.title}</span>
+            <Icon name="chevron" />
+          </button>
+        )}
         <div className="toolbar">
-          <div className="tempo-tools">
-            <label
-              className="toolbar-speed"
-              title={`拖动调节速度：${Math.round(currentTempo * 0.25)}–${Math.round(currentTempo * 1.5)} BPM；自由跟弹不限时间`}
-            >
-              <input
-                aria-label="速度"
-                aria-valuetext={`${Math.round((currentTempo * settings.speed) / 100)} BPM`}
-                type="range"
-                min="25"
-                max="150"
-                step="1"
-                value={settings.speed}
-                onChange={(event) =>
-                  configure({ speed: Number(event.target.value) })
+          {freePlay ? (
+            <button onClick={() => freeSession.current.clear()}>清空</button>
+          ) : (
+            <>
+              <div className="tempo-tools">
+                <label
+                  className="toolbar-speed"
+                  title={`拖动调节速度：${Math.round(currentTempo * 0.25)}–${Math.round(currentTempo * 1.5)} BPM；自由跟弹不限时间`}
+                >
+                  <input
+                    aria-label="速度"
+                    aria-valuetext={`${Math.round((currentTempo * settings.speed) / 100)} BPM`}
+                    type="range"
+                    min="25"
+                    max="150"
+                    step="1"
+                    value={settings.speed}
+                    onChange={(event) =>
+                      configure({ speed: Number(event.target.value) })
+                    }
+                  />
+                  <span className="tempo-bpm">
+                    {Math.round((currentTempo * settings.speed) / 100)} BPM
+                  </span>
+                </label>
+                <span className="tempo-reading" aria-label="当前节拍">
+                  {m?.beats ?? 4}/{m?.beatType ?? 4}
+                </span>
+                <button
+                  className={`icon-button metronome-button${settings.metronome ? " active" : ""}`}
+                  aria-label="节拍器"
+                  aria-pressed={settings.metronome}
+                  title="节拍器"
+                  onClick={() => configure({ metronome: !settings.metronome })}
+                >
+                  <Icon name="metronome" />
+                </button>
+              </div>
+              <button
+                className="primary"
+                onClick={() => void start()}
+                disabled={!ready || busy}
+              >
+                <Icon name={e.running ? "pause" : "play"} />
+                {e.running
+                  ? "暂停"
+                  : activeMs.current && !e.done
+                    ? "继续"
+                    : "开始"}
+              </button>
+              <button onClick={() => reset()} title="从头重来">
+                <Icon name="restart" />
+                重来
+              </button>
+              <button
+                className={
+                  loopTool || settings.loop
+                    ? "loop-toggle active"
+                    : "loop-toggle"
                 }
-              />
-              <span className="tempo-bpm">
-                {Math.round((currentTempo * settings.speed) / 100)} BPM
-              </span>
-            </label>
-            <span className="tempo-reading" aria-label="当前节拍">
-              {m?.beats ?? 4}/{m?.beatType ?? 4}
-            </span>
-            <button
-              className={`icon-button metronome-button${settings.metronome ? " active" : ""}`}
-              aria-label="节拍器"
-              aria-pressed={settings.metronome}
-              title="节拍器"
-              onClick={() => configure({ metronome: !settings.metronome })}
-            >
-              <Icon name="metronome" />
-            </button>
-          </div>
-          <button
-            className="primary"
-            onClick={() => void start()}
-            disabled={!ready || busy}
-          >
-            <Icon name={e.running ? "pause" : "play"} />
-            {e.running ? "暂停" : activeMs.current && !e.done ? "继续" : "开始"}
-          </button>
-          <button onClick={() => reset()} title="从头重来">
-            <Icon name="restart" />
-            重来
-          </button>
-          <button
-            className={
-              loopTool || settings.loop ? "loop-toggle active" : "loop-toggle"
-            }
-            aria-label="重复工具"
-            aria-pressed={loopTool || settings.loop}
-            title="在曲谱上拖选小节"
-            onClick={() => {
-              const enabled = !(loopTool || settings.loop);
-              setLoopTool(enabled);
-              if (!enabled) configure({ loop: false });
-            }}
-          >
-            <Icon name="repeat" />
-            {settings.loop ? `${settings.from}–${settings.to}` : "重复"}
-          </button>
+                aria-label="重复工具"
+                aria-pressed={loopTool || settings.loop}
+                title="在曲谱上拖选小节"
+                onClick={() => {
+                  const enabled = !(loopTool || settings.loop);
+                  setLoopTool(enabled);
+                  if (!enabled) configure({ loop: false });
+                }}
+              >
+                <Icon name="repeat" />
+                {settings.loop ? `${settings.from}–${settings.to}` : "重复"}
+              </button>
+            </>
+          )}
           <button onClick={() => void fullscreen()} title="全屏 / Esc 退出">
             <Icon name={full ? "collapse" : "expand"} />
             {full ? "退出全屏" : "全屏"}
@@ -747,7 +785,10 @@ export default function App() {
           <button
             className="icon-button"
             title="更多设置"
-            onClick={() => setPanel(panel === "settings" ? null : "settings")}
+            onClick={() => {
+              if (freePlay) setSettingsTab("device");
+              setPanel(panel === "settings" ? null : "settings");
+            }}
           >
             <Icon name="settings" />
           </button>
@@ -767,56 +808,68 @@ export default function App() {
       )}
       {!home && (
         <main>
-          <section
-            className="sheet"
-            style={{ height: `${settings.sheetHeight}%` }}
-          >
-            <Sheet
-              xml={song.xml}
-              beat={Math.max(e.start, e.beat)}
-              trainer={e}
-              loopTool={loopTool}
-              onLoop={([from, to]) => {
-                const running = engine.current.running;
-                configure({ from, to, loop: true });
-                if (running) engine.current.startRun(performance.now(), false);
-                setLoopTool(false);
-              }}
-              onSeek={(beat) =>
-                configure({
-                  from:
-                    (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                      0) + 1,
-                  to: Math.max(
-                    settings.to,
-                    (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                      0) + 1,
-                  ),
-                  startBeat: beat,
-                })
-              }
+          {freePlay ? (
+            <FreePlay
+              session={freeSession.current}
+              minWhiteKeys={settings.minWhiteKeys}
+              split={settings.split}
+              registerMode={settings.registerMode}
             />
-          </section>
-          <input
-            className="resize"
-            aria-label="曲谱区域高度"
-            type="range"
-            min="22"
-            max="48"
-            value={settings.sheetHeight}
-            onChange={(v) => {
-              const h = Number(v.target.value);
-              setSettings((s) => ({ ...s, sheetHeight: h }));
-              setLibrary((l) => ({
-                ...l,
-                settings: {
-                  ...l.settings,
-                  [songId]: { ...settings, sheetHeight: h },
-                },
-              }));
-            }}
-          />
-          <Roll song={song} settings={settings} trainer={e} />
+          ) : (
+            <>
+              <section
+                className="sheet"
+                style={{ height: `${settings.sheetHeight}%` }}
+              >
+                <Sheet
+                  xml={song.xml}
+                  beat={Math.max(e.start, e.beat)}
+                  trainer={e}
+                  loopTool={loopTool}
+                  onLoop={([from, to]) => {
+                    const running = engine.current.running;
+                    configure({ from, to, loop: true });
+                    if (running)
+                      engine.current.startRun(performance.now(), false);
+                    setLoopTool(false);
+                  }}
+                  onSeek={(beat) =>
+                    configure({
+                      from:
+                        (song.measures.findLast((m) => m.beat <= beat)?.index ??
+                          0) + 1,
+                      to: Math.max(
+                        settings.to,
+                        (song.measures.findLast((m) => m.beat <= beat)?.index ??
+                          0) + 1,
+                      ),
+                      startBeat: beat,
+                    })
+                  }
+                />
+              </section>
+              <input
+                className="resize"
+                aria-label="曲谱区域高度"
+                type="range"
+                min="22"
+                max="48"
+                value={settings.sheetHeight}
+                onChange={(v) => {
+                  const h = Number(v.target.value);
+                  setSettings((s) => ({ ...s, sheetHeight: h }));
+                  setLibrary((l) => ({
+                    ...l,
+                    settings: {
+                      ...l.settings,
+                      [songId]: { ...settings, sheetHeight: h },
+                    },
+                  }));
+                }}
+              />
+              <Roll song={song} settings={settings} trainer={e} />
+            </>
+          )}
         </main>
       )}
       {panel && (
@@ -904,18 +957,20 @@ export default function App() {
                       ["device", "设备"],
                       ["display", "显示"],
                     ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      role="tab"
-                      aria-selected={settingsTab === id}
-                      aria-controls={`settings-${id}`}
-                      id={`tab-${id}`}
-                      onClick={() => setSettingsTab(id)}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  )
+                    .filter(([id]) => !freePlay || id !== "practice")
+                    .map(([id, label]) => (
+                      <button
+                        key={id}
+                        role="tab"
+                        aria-selected={settingsTab === id}
+                        aria-controls={`settings-${id}`}
+                        id={`tab-${id}`}
+                        onClick={() => setSettingsTab(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
                 </div>
                 <div className="settings-pages">
                   <div
@@ -1159,7 +1214,7 @@ export default function App() {
                         />
                       </label>
                     </section>
-                    <details className="settings-advanced">
+                    <details className="settings-advanced" hidden={freePlay}>
                       <summary>声部分配</summary>
                       {song.tracks.map((t) => (
                         <label className="field track" key={t.id}>

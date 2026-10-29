@@ -17,6 +17,7 @@ export default function LibraryHome({
   onDevice,
   onHistory,
   onHelp,
+  onFreePlay,
   device,
   ready,
 }: {
@@ -27,6 +28,7 @@ export default function LibraryHome({
   onDevice: () => void;
   onHistory: () => void;
   onHelp: () => void;
+  onFreePlay: () => void;
   device: string;
   ready: boolean;
 }) {
@@ -90,6 +92,10 @@ export default function LibraryHome({
         </div>
         <div className="nav-menu">
           {nav("all", "发现曲目", "grid")}
+          <button onClick={onFreePlay}>
+            <Icon name="piano" />
+            自由练习
+          </button>
           {nav("favorites", "我的收藏", "heart", favorite.size)}
           {nav("daily", "每日视奏", "daily")}
           {nav("recent", "最近练习", "clock")}
