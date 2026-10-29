@@ -17,26 +17,40 @@ export default function Roll({
   song,
   settings,
   trainer,
+  pitches,
+  onInput,
 }: {
   song: Song;
   settings: Settings;
   trainer: Trainer;
+  pitches: number[];
+  onInput: (data: number[]) => void;
 }) {
-  const [range, setRange] = useState<[number, number]>([21, 42]);
-  const viewport = useRef(new KeyboardRange());
+  const [viewport] = useState(() => {
+    const current = new KeyboardRange();
+    current.reset(pitches);
+    current.update(
+      [],
+      settings.minWhiteKeys ?? 21,
+      settings.registerMode ?? "follow",
+      performance.now() / 1000,
+    );
+    return { current };
+  });
+  const [range, setRange] = useState<[number, number]>(viewport.current.range);
   const surface = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null),
     rollCanvas = useRef<HTMLCanvasElement>(null),
     keyCanvas = useRef<HTMLCanvasElement>(null),
     roll = useRef<FallingNotesRenderer | null>(null),
     keyboard = useRef<PianoKeyboard | null>(null),
-    latest = useRef({ song, settings, trainer }),
+    latest = useRef({ song, settings, trainer, onInput }),
     last = useRef(-Infinity),
     spawned = useRef(new Set<string>()),
     held = useRef(new Set<number>()),
     demonstrated = useRef(new Map<number, NoteEvent>());
   const [error, setError] = useState("");
-  latest.current = { song, settings, trainer };
+  latest.current = { song, settings, trainer, onInput };
   const notes = useMemo<NoteEvent[]>(
     () =>
       (settings.mode === "listen"
@@ -59,6 +73,7 @@ export default function Roll({
   );
   const notesRef = useRef(notes);
   notesRef.current = notes;
+  useEffect(() => viewport.current.reset(pitches), [pitches]);
   useEffect(() => {
     if (!host.current || !rollCanvas.current || !keyCanvas.current) return;
     const holder = host.current;
@@ -108,10 +123,8 @@ export default function Roll({
       showHandColors: true,
       useFlats: false,
       customColors: colors,
-      onKeyPress: (midi) =>
-        latest.current.trainer.down(midi, 96, performance.now()),
-      onKeyRelease: (midi) =>
-        latest.current.trainer.up(midi, performance.now()),
+      onKeyPress: (midi) => latest.current.onInput([144, midi, 96]),
+      onKeyRelease: (midi) => latest.current.onInput([128, midi, 0]),
       onPan: (delta, active) => {
         holder.toggleAttribute("data-panning", active);
         if (delta)
@@ -168,18 +181,17 @@ export default function Roll({
           const startTime = beatToSeconds(trainer.start, song.tempos);
           const mode = latest.current.settings.registerMode ?? "follow";
           const minimum = latest.current.settings.minWhiteKeys ?? 21;
-          const upcoming = notesRef.current
-            .filter((n) => n.endSeconds >= time && n.startSeconds <= time + 5)
-            .map((n) => n.midi);
+          const focus =
+            trainer.settings.mode === "wait"
+              ? trainer.target.map((n) => n.midi)
+              : notesRef.current
+                  .filter(
+                    (n) => n.endSeconds > time && n.startSeconds <= time + 0.35,
+                  )
+                  .map((n) => n.midi);
           const before = viewport.current.range;
           const next = viewport.current.update(
-            [
-              ...upcoming,
-              ...trainer.held.keys(),
-              ...(trainer.settings.mode === "wait"
-                ? trainer.target.map((n) => n.midi)
-                : []),
-            ],
+            [...focus, ...trainer.held.keys()],
             minimum,
             mode,
             performance.now() / 1000,
@@ -318,7 +330,6 @@ export default function Roll({
     held.current.clear();
     demonstrated.current.clear();
     last.current = -Infinity;
-    viewport.current.reset();
     roll.current?.setOptions({
       measureStarts: song.measures.map((m) =>
         beatToSeconds(m.beat, song.tempos),

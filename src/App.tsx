@@ -23,12 +23,19 @@ import Sheet from "./Sheet";
 import Roll from "./Roll";
 import FreePlay from "./FreePlay";
 import { FreePlaySession } from "./freeSession";
+import {
+  PracticeTime,
+  summarizePracticeTime,
+  type PracticeSpan,
+} from "./practiceTime";
 import LibraryHome from "./LibraryHome";
 import Icon from "./Icon";
 import {
   loadBrowserLibrary,
   saveBrowserLibrary,
   backupBrowserLibrary,
+  loadPracticeSpans,
+  savePracticeSpans,
 } from "./browserStore";
 import { loadCatalogue } from "./catalogue";
 import {
@@ -57,8 +64,32 @@ const initial = (): Library => ({
   results: [],
   lastSong: "loading",
 });
+const practiceDate = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+function practiceDuration(ms: number) {
+  const seconds = Math.floor(ms / 1000);
+  if (ms > 0 && seconds === 0) return "不足1秒";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes >= 60 ? `${Math.floor(minutes / 60)}小时` : ""}${minutes ? `${minutes % 60}分` : ""}${seconds % 60}秒`;
+}
 export default function App() {
   const freeSession = useRef(new FreePlaySession());
+  const practiceTime = useRef(new PracticeTime());
+  const [practiceSpans, setPracticeSpans] = useState<PracticeSpan[]>([]);
+  const spansRef = useRef(practiceSpans);
+  spansRef.current = practiceSpans;
+  const lastPracticeCheckpoint = useRef(0);
+  const practiceSummary = useMemo(
+    () => summarizePracticeTime(practiceSpans),
+    [practiceSpans],
+  );
   const piano = useRef(new PianoAudio());
   const outputRoute = useRef<"midi" | "browser">("midi");
   const playRequest = useRef(0);
@@ -99,6 +130,16 @@ export default function App() {
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const song = library.songs.find((s) => s.id === songId) ?? library.songs[0];
+  const keyboardPitches = useMemo(() => {
+    const ignored = new Set(
+      song.tracks
+        .filter((track) => track.role === "ignore")
+        .map((track) => track.id),
+    );
+    return song.notes
+      .filter((note) => !ignored.has(note.track))
+      .map((note) => note.midi);
+  }, [song]);
   const missingFingers =
     song.notes.length > 0 &&
     !song.notes.some((n) => n.finger) &&
@@ -139,6 +180,7 @@ export default function App() {
     played.current.clear();
   };
   const pause = () => {
+    rememberPractice(practiceTime.current.stop(Date.now()));
     playRequest.current++;
     setLoadingAudio(false);
     freeSession.current.release(performance.now() / 1000);
@@ -253,13 +295,40 @@ export default function App() {
       setError("保存失败：" + String(e));
     }
   }
+  function rememberPractice(span: PracticeSpan | undefined) {
+    if (!span || !readyRef.current || unsafeLoad.current) return;
+    if (
+      spansRef.current.find((item) => item.id === span.id)?.endedAt ===
+      span.endedAt
+    )
+      return;
+    const next = [
+      span,
+      ...spansRef.current.filter((item) => item.id !== span.id),
+    ];
+    spansRef.current = next;
+    setPracticeSpans(next);
+  }
+  async function savePractice() {
+    if (!readyRef.current || unsafeLoad.current) return;
+    try {
+      await savePracticeSpans(spansRef.current);
+    } catch (error) {
+      setError("练琴记录保存失败：" + String(error));
+    }
+  }
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const bundled = await loadCatalogue();
-        const saved = await loadBrowserLibrary();
+        const [bundled, saved, spans] = await Promise.all([
+          loadCatalogue(),
+          loadBrowserLibrary(),
+          loadPracticeSpans(),
+        ]);
         if (cancelled) return;
+        if (spans && !Array.isArray(spans)) throw Error("练琴记录格式无效");
+        setPracticeSpans(spans ?? []);
         if (
           saved &&
           (saved.version !== 1 ||
@@ -351,22 +420,50 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [library, ready]);
   useEffect(() => {
+    if (!ready) return;
+    const timer = setTimeout(() => void savePractice(), 350);
+    return () => clearTimeout(timer);
+  }, [practiceSpans, ready]);
+  function receiveInput(data: Uint8Array | number[]) {
+    if (homeRef.current || document.hidden) return;
+    const [status, key, value] = data;
+    const code = status & 0xf0;
+    const mode = settingsRef.current.mode;
+    if (
+      mode !== "listen" &&
+      (mode === "free" ? !freePausedRef.current : engine.current.running)
+    ) {
+      const now = Date.now();
+      if (code === 0x90 && value > 0)
+        rememberPractice(
+          practiceTime.current.noteOn(
+            key,
+            {
+              songId: songRef.current.id,
+              title: songRef.current.title,
+              mode,
+            },
+            now,
+          ),
+        );
+      else if (code === 0x80 || code === 0x90)
+        rememberPractice(practiceTime.current.noteOff(key, now));
+    }
+    if (settingsRef.current.mode === "free") {
+      if (!freePausedRef.current)
+        freeSession.current.input(data, performance.now() / 1000);
+      return;
+    }
+    const e = engine.current;
+    if (code === 0x90 && value > 0) e.down(key, value, performance.now());
+    else if (code === 0x80 || code === 0x90) e.up(key, performance.now());
+    else if (code === 0xb0 && key === 64) e.pedal = value;
+    refresh((v) => v + 1);
+  }
+  useEffect(() => {
     const midi = new MidiDevices(
       () => devicesChanged((v) => v + 1),
-      (data) => {
-        if (settingsRef.current.mode === "free" && !homeRef.current) {
-          if (!freePausedRef.current)
-            freeSession.current.input(data, performance.now() / 1000);
-          return;
-        }
-        const [status, key, value] = data;
-        const code = status & 0xf0;
-        const e = engine.current;
-        if (code === 0x90 && value > 0) e.down(key, value, performance.now());
-        else if (code === 0x80 || code === 0x90) e.up(key, performance.now());
-        else if (code === 0xb0 && key === 64) e.pedal = value;
-        refresh((v) => v + 1);
-      },
+      receiveInput,
       () => {
         pause();
         engine.current.pedal = 0;
@@ -434,6 +531,7 @@ export default function App() {
     const saveAndPause = () => {
       pause();
       if (readyRef.current) void save(libRef.current);
+      void savePractice();
     };
     const visibility = () => {
       if (document.hidden) saveAndPause();
@@ -447,6 +545,8 @@ export default function App() {
   }, []);
   const finish = () => {
     const e = engine.current;
+    if (!e.settings.loop)
+      rememberPractice(practiceTime.current.stop(Date.now()));
     resetOutput();
     if (e.settings.mode === "listen" || e.settings.mode === "free") {
       if (e.settings.mode === "listen" && e.settings.loop) {
@@ -557,6 +657,10 @@ export default function App() {
         finishRef.current();
       }
       lastFrame.current = now;
+      if (now - lastPracticeCheckpoint.current >= 5000) {
+        lastPracticeCheckpoint.current = now;
+        rememberPractice(practiceTime.current.checkpoint(Date.now()));
+      }
       if (!homeRef.current && e.running && now - previousDraw > 32) {
         refresh((v) => v + 1);
         previousDraw = now;
@@ -968,13 +1072,21 @@ export default function App() {
           {freePlay ? (
             <FreePlay
               session={freeSession.current}
+              pitches={keyboardPitches}
+              onInput={receiveInput}
               paused={freePaused}
               minWhiteKeys={settings.minWhiteKeys}
               split={settings.split}
               registerMode={settings.registerMode}
             />
           ) : (
-            <Roll song={song} settings={settings} trainer={e} />
+            <Roll
+              song={song}
+              settings={settings}
+              trainer={e}
+              pitches={keyboardPitches}
+              onInput={receiveInput}
+            />
           )}
         </main>
       )}
@@ -1269,6 +1381,7 @@ export default function App() {
                       <label className="field">
                         键盘音区
                         <select
+                          aria-label="键盘音区"
                           value={settings.registerMode ?? "follow"}
                           onChange={(v) =>
                             displaySettings({
@@ -1383,31 +1496,84 @@ export default function App() {
             )}
             {panel === "history" && (
               <>
-                {library.results.length === 0 ? (
-                  <p className="muted">完成一次练习后会显示记录。</p>
-                ) : (
-                  library.results.map((r) => (
-                    <div className="history-row" key={r.id}>
+                <section aria-label="练琴时长">
+                  <div className="practice-totals">
+                    <div>
+                      <small>今日</small>
                       <strong>
-                        {r.title}
-                        <b>{r.accuracy}%</b>
+                        {practiceDuration(
+                          practiceSummary.byDay[
+                            new Date().toLocaleDateString("sv-SE")
+                          ] ?? 0,
+                        )}
                       </strong>
-                      <small>
-                        {new Date(r.date).toLocaleString("zh-CN")} ·{" "}
-                        {r.mode === "wait"
-                          ? "自由跟弹"
-                          : `节奏 · ${Math.round(r.speed)}%`}
-                      </small>
-                      <p>
-                        正确 {r.correct}　错音 {r.wrong}　漏音 {r.missed}　
-                        {r.seconds} 秒
-                      </p>
-                      {r.problemMeasures.length > 0 && (
-                        <small>问题小节：{r.problemMeasures.join("、")}</small>
-                      )}
                     </div>
-                  ))
-                )}
+                    <div>
+                      <small>累计</small>
+                      <strong>
+                        {practiceDuration(practiceSummary.totalMs)}
+                      </strong>
+                    </div>
+                  </div>
+                  {practiceSpans.length === 0 ? (
+                    <p className="muted">弹奏后会显示时长和时间段。</p>
+                  ) : (
+                    practiceSpans.map((span) => (
+                      <div
+                        className="history-row practice-time-row"
+                        key={span.id}
+                      >
+                        <strong>
+                          {span.title}
+                          <b>{practiceDuration(span.durationMs)}</b>
+                        </strong>
+                        <small>
+                          {practiceDate.format(span.startedAt)} —{" "}
+                          {practiceDate.format(span.endedAt)}
+                        </small>
+                        <small>
+                          {
+                            {
+                              wait: "自由跟弹",
+                              free: "自由练习",
+                              rhythm: "节奏练习",
+                            }[span.mode]
+                          }
+                        </small>
+                      </div>
+                    ))
+                  )}
+                </section>
+                <details className="practice-results">
+                  <summary>练习成绩</summary>
+                  {library.results.length === 0 ? (
+                    <p className="muted">完成一次练习后会显示记录。</p>
+                  ) : (
+                    library.results.map((r) => (
+                      <div className="history-row" key={r.id}>
+                        <strong>
+                          {r.title}
+                          <b>{r.accuracy}%</b>
+                        </strong>
+                        <small>
+                          {new Date(r.date).toLocaleString("zh-CN")} ·{" "}
+                          {r.mode === "wait"
+                            ? "自由跟弹"
+                            : `节奏 · ${Math.round(r.speed)}%`}
+                        </small>
+                        <p>
+                          正确 {r.correct}　错音 {r.wrong}　漏音 {r.missed}　
+                          {r.seconds} 秒
+                        </p>
+                        {r.problemMeasures.length > 0 && (
+                          <small>
+                            问题小节：{r.problemMeasures.join("、")}
+                          </small>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </details>
               </>
             )}
             {panel === "help" && (
@@ -1439,6 +1605,9 @@ export default function App() {
                   0，关闭叠音/分键，避免重复输入。
                 </p>
                 <h3>数据与限制</h3>
+                <p>
+                  练习记录中可查看今日与累计时长、每次弹奏的起止时间。从实际按键开始计时，30秒无输入分段；示范、暂停和后台不计入。时段只保存在当前浏览器。
+                </p>
                 <p>
                   曲库和练习记录保存在当前浏览器。支持离线缓存的浏览器，首次缓存完成后可离线使用；清理网站数据会删除本机记录。曲谱反复与跳转按提示处理，不自动展开。
                 </p>

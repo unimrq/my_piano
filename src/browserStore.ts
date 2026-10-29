@@ -1,4 +1,5 @@
 import type { Library } from "./model";
+import type { PracticeSpan } from "./practiceTime";
 let database: Promise<IDBDatabase>;
 function open() {
   return (database ??= new Promise((resolve, reject) => {
@@ -8,7 +9,7 @@ function open() {
     request.onerror = () => reject(request.error);
   }));
 }
-async function read(key: string): Promise<Library | null> {
+async function read<T>(key: string): Promise<T | null> {
   const db = await open();
   return new Promise((resolve, reject) => {
     const request = db.transaction("data").objectStore("data").get(key);
@@ -16,7 +17,7 @@ async function read(key: string): Promise<Library | null> {
     request.onerror = () => reject(request.error);
   });
 }
-async function write(key: string, value: Library) {
+async function write<T>(key: string, value: T) {
   const db = await open();
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction("data", "readwrite");
@@ -27,7 +28,7 @@ async function write(key: string, value: Library) {
   });
 }
 export async function loadBrowserLibrary() {
-  const saved = await read("library");
+  const saved = await read<Library>("library");
   if (saved) return saved;
   const legacy = localStorage.getItem("qinxi-library");
   if (!legacy) return null;
@@ -36,6 +37,9 @@ export async function loadBrowserLibrary() {
   return data;
 }
 export const saveBrowserLibrary = (data: Library) => write("library", data);
+export const loadPracticeSpans = () => read<PracticeSpan[]>("practice-spans");
+export const savePracticeSpans = (spans: PracticeSpan[]) =>
+  write("practice-spans", spans);
 export async function backupBrowserLibrary(data: Library) {
   if (!(await read("before-scores"))) await write("before-scores", data);
 }

@@ -5,12 +5,16 @@ import type { FreePlaySession } from "./freeSession";
 import { KeyboardRange, pianoWhites as whites } from "./keyboardRange";
 export default function FreePlay({
   session,
+  pitches,
+  onInput,
   minWhiteKeys = 21,
   split = 60,
   registerMode = "follow",
   paused = false,
 }: {
   session: FreePlaySession;
+  pitches: number[];
+  onInput: (data: number[]) => void;
   minWhiteKeys?: number;
   split?: number;
   registerMode?: "follow" | "lock" | "full";
@@ -20,8 +24,14 @@ export default function FreePlay({
     surface = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
     keyCanvas = useRef<HTMLCanvasElement>(null);
-  const current = useRef({ minWhiteKeys, split, registerMode, paused });
-  current.current = { minWhiteKeys, split, registerMode, paused };
+  const current = useRef({
+    minWhiteKeys,
+    split,
+    registerMode,
+    paused,
+    onInput,
+  });
+  current.current = { minWhiteKeys, split, registerMode, paused, onInput };
   const [error, setError] = useState("");
   useEffect(() => {
     const holder = host.current!,
@@ -39,6 +49,13 @@ export default function FreePlay({
     let pausedAt: number | null = null;
     let restoreKeys = false;
     const viewport = new KeyboardRange([16, 37]);
+    viewport.reset(pitches);
+    viewport.update(
+      [],
+      current.current.minWhiteKeys,
+      current.current.registerMode,
+      performance.now() / 1000,
+    );
     const held = new Set<number>();
     const keys = new PianoKeyboard(input, {
       width: 100,
@@ -49,12 +66,10 @@ export default function FreePlay({
       showHandColors: true,
       useFlats: false,
       onKeyPress: (m) => {
-        if (!current.current.paused)
-          session.input([144, m, 96], performance.now() / 1000);
+        if (!current.current.paused) current.current.onInput([144, m, 96]);
       },
       onKeyRelease: (m) => {
-        if (!current.current.paused)
-          session.input([128, m, 0], performance.now() / 1000);
+        if (!current.current.paused) current.current.onInput([128, m, 0]);
       },
       onPan: (delta, active) => {
         holder.toggleAttribute("data-panning", active);
@@ -102,12 +117,9 @@ export default function FreePlay({
       const now = pausedAt ?? realNow;
       session.prune(now);
       const active = [...session.active.values()];
-      const recent = session.notes.filter(
-        (note) => note.end === undefined || note.end >= now - 2.5,
-      );
       const previous = viewport.range;
       const next = viewport.update(
-        (recent.length ? recent : session.notes.slice(-1)).map(
+        (active.length ? active : session.notes.slice(-1)).map(
           (note) => note.midi,
         ),
         current.current.minWhiteKeys,
@@ -203,7 +215,7 @@ export default function FreePlay({
       session.release(performance.now() / 1000);
       keys.destroy();
     };
-  }, [session]);
+  }, [session, pitches]);
   return (
     <div ref={host} className="free-play roll-keyboard upstream-renderer">
       <div ref={surface} className="roll-surface">

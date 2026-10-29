@@ -1022,6 +1022,32 @@ h3 {
   padding: 17px 0;
   border-bottom: 1px solid #29292f;
 }
+.practice-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #303037;
+}
+.practice-totals small {
+  display: block;
+  margin-bottom: 8px;
+  color: #b8b3c4;
+}
+.practice-totals strong {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+.practice-results {
+  margin-top: 20px;
+  border-top: 1px solid #303037;
+  padding-top: 16px;
+}
+.practice-results summary {
+  cursor: pointer;
+  color: #cfc8dc;
+  font-size: 14px;
+}
 .history-row strong {
   display: flex;
   justify-content: space-between;

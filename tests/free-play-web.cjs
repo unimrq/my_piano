@@ -127,21 +127,27 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           document.querySelector('[aria-label="上升音符"]').dataset.notes ===
           "0",
       );
+      const fixedFreeKeys = Number(
+        await page.locator(".free-play").getAttribute("data-visible-whites"),
+      );
       await page.evaluate(() => [24, 103].forEach((m) => window.note(m, 100)));
-      await page.waitForFunction(
-        () =>
-          Number(document.querySelector(".free-play").dataset.visibleWhites) >
-          40,
+      await page.waitForTimeout(200);
+      assert.equal(
+        Number(
+          await page.locator(".free-play").getAttribute("data-visible-whites"),
+        ),
+        fixedFreeKeys,
       );
       await page.evaluate(() => {
         [24, 103].forEach((m) => window.note(m, 0));
         window.note(64, 100);
       });
-      await page.waitForFunction(
-        () =>
-          document.querySelector(".free-play").dataset.visibleWhites === "21",
-        undefined,
-        { timeout: 12000 },
+      await page.waitForTimeout(200);
+      assert.equal(
+        Number(
+          await page.locator(".free-play").getAttribute("data-visible-whites"),
+        ),
+        fixedFreeKeys,
       );
       await page.evaluate(() => window.note(64, 0));
       await page.getByRole("button", { name: "曲库", exact: true }).click();
@@ -171,20 +177,24 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           .getAttribute("data-visible-whites"),
       );
       await page.evaluate(() => [24, 103].forEach((m) => window.note(m, 100)));
-      await page.waitForFunction(
-        () =>
-          Number(
-            document.querySelector(".roll-keyboard").dataset.visibleWhites,
-          ) > 40,
+      await page.waitForTimeout(200);
+      assert.equal(
+        Number(
+          await page
+            .locator(".roll-keyboard")
+            .getAttribute("data-visible-whites"),
+        ),
+        initialKeys,
       );
       await page.evaluate(() => [24, 103].forEach((m) => window.note(m, 0)));
-      await page.waitForFunction(
-        (initial) =>
-          Number(
-            document.querySelector(".roll-keyboard").dataset.visibleWhites,
-          ) <= initial,
+      await page.waitForTimeout(200);
+      assert.equal(
+        Number(
+          await page
+            .locator(".roll-keyboard")
+            .getAttribute("data-visible-whites"),
+        ),
         initialKeys,
-        { timeout: 8000 },
       );
       await page.getByLabel("练习模式", { exact: true }).selectOption("free");
       await plot.waitFor();
@@ -207,8 +217,8 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           perSongModeSaved: true,
           switchBackToWait: true,
           otherSongUnchanged: true,
-          adaptiveKeyboard: true,
-          pausedZoomRecovery: true,
+          fixedKeyboardWidth: true,
+          farKeysDoNotResize: true,
           passed: true,
         }),
       );

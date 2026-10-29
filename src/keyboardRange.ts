@@ -2,19 +2,46 @@ export const pianoWhites = Array.from({ length: 88 }, (_, i) => i + 21).filter(
   (midi) => ![1, 3, 6, 8, 10].includes(midi % 12),
 );
 
+const whiteBounds = (low: number, high: number): [number, number] => {
+  const last = pianoWhites.findIndex((m) => m >= high);
+  return [
+    Math.max(
+      0,
+      pianoWhites.findLastIndex((m) => m <= low),
+    ),
+    last < 0 ? 51 : last,
+  ];
+};
+
 export class KeyboardRange {
   private layout = "";
+  private main: [number, number] | undefined;
   private movedAt = -Infinity;
-  private pending: { low: number; high: number; since: number } | undefined;
+  private pending:
+    { low: number; high: number; since: number; idle: boolean } | undefined;
   private manualUntil = -Infinity;
 
   constructor(public range: [number, number] = [21, 42]) {}
 
-  reset() {
+  reset(scorePitches: number[] = []) {
     this.layout = "";
     this.pending = undefined;
     this.manualUntil = -Infinity;
+    this.main = undefined;
+    if (!scorePitches.length) return;
+    const sorted = [...scorePitches].sort((a, b) => a - b);
+    const needed = Math.ceil(sorted.length * 0.97);
+    let first = 0;
+    for (let i = 1; i <= sorted.length - needed; i++) {
+      if (
+        sorted[i + needed - 1] - sorted[i] <
+        sorted[first + needed - 1] - sorted[first]
+      )
+        first = i;
+    }
+    this.main = whiteBounds(sorted[first], sorted[first + needed - 1]);
   }
+
   pan(whiteKeys: number, now: number) {
     const count = Math.round(this.range[1] - this.range[0]);
     const left = Math.max(0, Math.min(52 - count, this.range[0] + whiteKeys));
@@ -32,95 +59,130 @@ export class KeyboardRange {
   ): [number, number] {
     minimum = Math.max(7, Math.min(52, Math.round(minimum)));
     const layout = `${mode}:${minimum}`;
-    const changed = layout !== this.layout;
-    this.layout = layout;
-    const [left, right] = this.range;
-    const currentCount = Math.round(right - left);
     const center = (low: number, high: number, count: number) =>
       Math.max(
         0,
         Math.min(52 - count, Math.floor((low + high + 1 - count) / 2)),
       );
-    const move = (begin: number, count: number) => {
-      if (begin !== left || begin + count !== right) {
+    if (layout !== this.layout) {
+      this.layout = layout;
+      const span = this.main ? this.main[1] - this.main[0] + 1 : 0;
+      const count =
+        mode === "full"
+          ? 52
+          : mode === "follow" && span > minimum
+            ? Math.min(52, span + 2)
+            : minimum;
+      const bounds =
+        mode === "follow" && this.main
+          ? this.main
+          : [this.range[0], this.range[1] - 1];
+      const left = mode === "full" ? 0 : center(bounds[0], bounds[1], count);
+      this.range = [left, left + count];
+      this.movedAt = now;
+      this.pending = undefined;
+      this.manualUntil = -Infinity;
+    }
+    if (mode !== "follow" || now < this.manualUntil) return this.range;
+    const [left, right] = this.range;
+    const count = Math.round(right - left);
+    const home = this.main
+      ? center(this.main[0], this.main[1], count)
+      : undefined;
+    const position = (low: number, high: number) => {
+      if (home === undefined) return center(low, high, count);
+      // Keep the planned phrase visible. An outlier needs a small pan, not
+      // a jump that centers one note and hides most of the main range.
+      const padding = high - low + 3 <= count ? 1 : 0;
+      return Math.max(
+        0,
+        Math.min(
+          52 - count,
+          Math.max(high - count + 1 + padding, Math.min(low - padding, home)),
+        ),
+      );
+    };
+    const move = (begin: number) => {
+      if (begin !== left) {
         this.range = [begin, begin + count];
         this.movedAt = now;
       }
       this.pending = undefined;
       return this.range;
     };
-    if (mode === "full") return move(0, 52);
-    if (mode === "lock")
-      return changed
-        ? move(center(left, right - 1, minimum), minimum)
-        : this.range;
-    if (!changed && now < this.manualUntil) return this.range;
-    if (!pitches.length) {
-      this.pending = undefined;
-      return changed
-        ? move(center(left, right - 1, minimum), minimum)
-        : this.range;
-    }
-
-    const lowest = Math.min(...pitches),
-      highest = Math.max(...pitches);
-    const low = Math.max(
-      0,
-      pianoWhites.findLastIndex((m) => m <= lowest),
-    );
-    const highIndex = pianoWhites.findIndex((m) => m >= highest);
-    const high = highIndex < 0 ? 51 : highIndex;
-    // Keep an octave of white keys between zoom levels. Small changes at the
-    // look-ahead boundary should not resize the keyboard and both canvases.
-    const countFor = (low: number, high: number, padding = 6) =>
-      Math.min(
-        52,
-        minimum +
-          Math.max(0, Math.ceil((high - low + 1 + padding - minimum) / 7)) * 7,
-      );
-    const count = countFor(low, high);
-    if (changed) return move(center(low, high, count), count);
-    if (count > currentCount || low < left || high >= right) {
-      // A distant single note can require panning, but must not bypass the
-      // settling time and immediately shrink a previously wider view.
-      const nextCount = Math.max(currentCount, count);
-      return move(center(low, high, nextCount), nextCount);
-    }
-
-    const narrower = countFor(low, high, 9) < currentCount;
-    const offCenter =
-      Math.abs(center(low, high, currentCount) - left) >=
-      Math.max(3, Math.floor(currentCount * 0.14));
-    if (!narrower && !offCenter) {
+    const notes = [...new Set(pitches)].map((m) => whiteBounds(m, m));
+    const bounds = notes.length
+      ? [
+          Math.min(...notes.map((n) => n[0])),
+          Math.max(...notes.map((n) => n[1])),
+        ]
+      : this.main;
+    if (!bounds) {
       this.pending = undefined;
       return this.range;
     }
-    this.pending ??= { low, high, since: now };
-    this.pending.low = Math.min(this.pending.low, low);
-    this.pending.high = Math.max(this.pending.high, high);
-    const pendingCount = countFor(this.pending.low, this.pending.high);
-    // Use the whole observed phrase, rather than the last frame, to avoid
-    // zooming in on one note immediately before the next chord returns.
-    // Extra padding gates a shrink; it must not become the new width, which
-    // would leave an unchanged phrase one zoom level wider after a stray note.
+    const idle = !notes.length;
+    const [low, high] = bounds;
+    if (high - low + 1 > count) {
+      // A distant note must not hide a larger chord or change the song's zoom.
+      const current = notes.filter(
+        ([lo, hi]) => lo >= left && hi < right,
+      ).length;
+      let best = left,
+        most = current,
+        centered = Infinity;
+      for (let begin = 0; begin <= 52 - count; begin++) {
+        const covered = notes.filter(
+          ([lo, hi]) => lo >= begin && hi < begin + count,
+        );
+        if (!covered.length) continue;
+        const error = Math.abs(
+          center(
+            Math.min(...covered.map((n) => n[0])),
+            Math.max(...covered.map((n) => n[1])),
+            count,
+          ) - begin,
+        );
+        if (
+          covered.length > most ||
+          (covered.length === most &&
+            (error < centered ||
+              (error === centered &&
+                Math.abs(begin - left) < Math.abs(best - left))))
+        ) {
+          best = begin;
+          most = covered.length;
+          centered = error;
+        }
+      }
+      this.pending = undefined;
+      return most > current ? move(best) : this.range;
+    }
+    const goal = position(low, high);
+    if (!idle && (low < left || high >= right)) return move(goal);
+    const returning = home !== undefined && goal === home;
     if (
-      narrower &&
-      countFor(this.pending.low, this.pending.high, 9) >= currentCount
+      Math.abs(goal - left) <
+      (returning ? 1 : Math.max(3, Math.floor(count * 0.14)))
     ) {
       this.pending = undefined;
       return this.range;
     }
-    const wait = narrower ? 3 : 1;
-    if (now - this.pending.since >= wait && now - this.movedAt >= 2.5) {
-      return move(
-        center(
-          this.pending.low,
-          this.pending.high,
-          narrower ? pendingCount : currentCount,
-        ),
-        narrower ? pendingCount : currentCount,
-      );
+    const settling = idle || returning;
+    if (!this.pending || this.pending.idle !== settling)
+      this.pending = { low, high, since: now, idle: settling };
+    const pending = this.pending;
+    pending.low = Math.min(pending.low, low);
+    pending.high = Math.max(pending.high, high);
+    if (pending.high - pending.low + 1 > count) {
+      this.pending = undefined;
+      return this.range;
     }
+    if (
+      now - pending.since >= (settling ? 2.5 : 1) &&
+      now - this.movedAt >= 2.5
+    )
+      return move(position(pending.low, pending.high));
     return this.range;
   }
 }
