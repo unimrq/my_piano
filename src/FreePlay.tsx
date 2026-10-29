@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "pixi.js/unsafe-eval";
 import { PianoKeyboard } from "./vendor/bach/PianoKeyboard";
 import type { FreePlaySession } from "./freeSession";
-const whites = Array.from({ length: 88 }, (_, i) => i + 21).filter(
-  (m) => ![1, 3, 6, 8, 10].includes(m % 12),
-);
+import { KeyboardRange, pianoWhites as whites } from "./keyboardRange";
 export default function FreePlay({
   session,
   minWhiteKeys = 21,
@@ -35,13 +33,9 @@ export default function FreePlay({
       height = 0,
       keyHeight = 180,
       low = 16,
-      count = 21,
-      lastMove = -Infinity;
+      count = 21;
+    const viewport = new KeyboardRange([16, 37]);
     const held = new Set<number>();
-    const visibleCount = () =>
-      current.current.registerMode === "full"
-        ? 52
-        : Math.max(7, Math.min(52, Math.round(current.current.minWhiteKeys)));
     const keys = new PianoKeyboard(input, {
       width: 100,
       height: 180,
@@ -54,8 +48,9 @@ export default function FreePlay({
       onKeyRelease: (m) => session.input([128, m, 0], performance.now() / 1000),
     });
     const layout = () => {
-      count = visibleCount();
-      low = Math.max(0, Math.min(52 - count, low));
+      [low] = viewport.range;
+      count = viewport.range[1] - low;
+      holder.dataset.visibleWhites = String(count);
       content.style.width = `${5200 / count}%`;
       content.style.transform = `translateX(${(-low * 100) / 52}%)`;
       width = (holder.clientWidth * 52) / count;
@@ -75,29 +70,24 @@ export default function FreePlay({
       if (disposed) return;
       const now = performance.now() / 1000;
       session.prune(now);
-      if (count !== visibleCount()) layout();
       const active = [...session.active.values()];
-      const recent = active.length ? active : session.notes.slice(-1);
-      if (
-        current.current.registerMode === "follow" &&
-        recent.length &&
-        now - lastMove > 2.5
-      ) {
-        const indices = recent.map((n) =>
-          Math.max(
-            0,
-            whites.findLastIndex((m) => m <= n.midi),
-          ),
-        );
-        const first = Math.min(...indices),
-          last = Math.max(...indices);
-        if (first < low + 1 || last >= low + count - 1) {
-          low = Math.max(
-            0,
-            Math.min(52 - count, Math.round((first + last - count) / 2)),
-          );
+      const recent = session.notes.filter(
+        (note) => note.end === undefined || note.end >= now - 2.5,
+      );
+      const previous = viewport.range;
+      const next = viewport.update(
+        (recent.length ? recent : session.notes.slice(-1)).map(
+          (note) => note.midi,
+        ),
+        current.current.minWhiteKeys,
+        current.current.registerMode,
+        now,
+      );
+      if (next !== previous) {
+        if (next[1] - next[0] !== count) layout();
+        else {
+          [low] = next;
           content.style.transform = `translateX(${(-low * 100) / 52}%)`;
-          lastMove = now;
         }
       }
       context.clearRect(0, 0, width, height);

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { it, expect } from "vitest";
 import { planFingering, type FingerNote } from "../src/vendor/pianoplayer";
-import { applyFingering, fingeringInput } from "../src/fingering";
+import {
+  applyFingering,
+  fingeringInput,
+  compactChordFingerings,
+} from "../src/fingering";
 import { parseMusicXml } from "../src/importer";
 const seq = (
   pitches: number[],
@@ -96,4 +100,47 @@ it("伴奏和忽略声部不参与指法计算", () => {
   const song = parseMusicXml(xml, "测试");
   song.tracks[0].role = "backing";
   expect(fingeringInput(song, 60)).toEqual([]);
+});
+it("谱面和弦仅显示右手高音与左手低音指法，保存数据保持完整", () => {
+  const note = (
+    step: string,
+    octave: number,
+    finger: number,
+    chord = false,
+    staff = 1,
+  ) =>
+    `<note>${chord ? "<chord/>" : ""}<pitch><step>${step}</step><octave>${octave}</octave></pitch><duration>1</duration><staff>${staff}</staff><notations><technical><fingering>${finger}</fingering></technical></notations></note>`;
+  for (const singlePart of [false, true]) {
+    const right =
+      note("C", 4, 1) + note("E", 4, 3, true) + note("G", 4, 5, true);
+    const left =
+      note("G", 3, 1, false, 2) +
+      note("E", 3, 3, true, 2) +
+      note("C", 3, 5, true, 2);
+    const original = `<score-partwise>${singlePart ? `<part><measure>${right}${left}</measure></part>` : `<part><measure>${right}</measure></part><part><measure>${left}</measure></part>`}</score-partwise>`;
+    const source = new DOMParser().parseFromString(original, "application/xml");
+    const display = source.cloneNode(true) as Document;
+    compactChordFingerings(display);
+    expect(source.querySelectorAll("fingering")).toHaveLength(6);
+    expect(
+      [...display.querySelectorAll("note")]
+        .filter((n) => n.querySelector("fingering"))
+        .map((n) => [
+          n.querySelector("step")!.textContent,
+          n.querySelector("octave")!.textContent,
+          n.querySelector("fingering")!.textContent,
+        ]),
+    ).toEqual([
+      ["G", "4", "5"],
+      ["C", "3", "5"],
+    ]);
+  }
+  const voices = new DOMParser().parseFromString(
+    `<score-partwise><part><measure><attributes><divisions>2</divisions></attributes>${note("C", 4, 1)}<backup><duration>1</duration></backup>${note("G", 4, 5)}<backup><duration>1</duration></backup>${note("E", 4, 3)}</measure></part></score-partwise>`,
+    "application/xml",
+  );
+  compactChordFingerings(voices);
+  expect(
+    [...voices.querySelectorAll("fingering")].map((n) => n.textContent),
+  ).toEqual(["5"]);
 });

@@ -11,8 +11,49 @@ const escape = (s: string) =>
         "'": "&apos;",
       })[c]!,
   );
-// Local MIDI-to-score reconstruction. Keep complete eighth-note triplets;
-// otherwise quantize to sixteenths, splitting barlines with ties.
+const lengths = [
+  [96, "breve"],
+  [48, "whole"],
+  [24, "half"],
+  [12, "quarter"],
+  [6, "eighth"],
+  [3, "16th"],
+  [1.5, "32nd"],
+] as const;
+const values = lengths
+  .flatMap(([ticks, type]) =>
+    [0, 1, 2].map((dots) => ({
+      ticks: ticks * (2 - 1 / 2 ** dots),
+      type,
+      dots,
+      triplet: false,
+    })),
+  )
+  .filter((v) => Number.isInteger(v.ticks))
+  .concat(
+    lengths.map(([ticks, type]) => ({
+      ticks: (ticks * 2) / 3,
+      type,
+      dots: 0,
+      triplet: true,
+    })),
+  )
+  .sort((a, b) => b.ticks - a.ticks);
+const fragments = (ticks: number, triplet = false) => {
+  const out: (typeof values)[number][] = [];
+  const tuplet = triplet || ticks % 3 !== 0;
+  while (ticks > 0) {
+    const value = values.find((v) => v.ticks <= ticks && v.triplet === tuplet);
+    if (!value) throw Error("自动转谱出现无法表示的时值");
+    out.push(value);
+    ticks -= value.ticks;
+  }
+  return out;
+};
+const noteType = (value: (typeof values)[number]) =>
+  `<type>${value.type}</type>${"<dot/>".repeat(value.dots)}${value.triplet ? "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>" : ""}`;
+
+// Keep MIDI timing untouched; only the practice score is quantized.
 export function makeXml(
   song: Pick<Song, "title" | "notes" | "measures" | "tempos" | "tracks">,
 ): string {
@@ -34,109 +75,139 @@ export function makeXml(
     if (new Set(group.map((n) => Math.round(n.beat * 3) % 3)).size === 3)
       for (const n of group) triplets.add(n.id);
   const quantize = (beat: number, triplet: boolean) =>
-    triplet ? Math.round(beat * 3) / 3 : Math.round(beat * 4) / 4;
+    triplet ? Math.round(beat * 3) * 4 : Math.round(beat * 4) * 3;
+
   return `<?xml version="1.0" encoding="utf-8"?><score-partwise version="4.0"><work><work-title>${escape(song.title)}</work-title></work><part-list>${parts.map((h, i) => `<score-part id="P${i}"><part-name>${h === "right" ? "右手" : "左手"}</part-name><part-abbreviation>${h === "right" ? "右" : "左"}</part-abbreviation></score-part>`).join("")}</part-list>${parts
-    .map(
-      (hand, pi) =>
-        `<part id="P${pi}">${song.measures
-          .map((m, mi) => {
-            const active = song.notes.filter(
-              (n) =>
-                n.hand === hand &&
-                song.tracks.find((t) => t.id === n.track)?.role !== "ignore",
-            );
-            const pieces = active
-              .map((n) => ({
-                ...n,
-                triplet: triplets.has(n.id),
-                start: Math.max(m.beat, quantize(n.beat, triplets.has(n.id))),
-                end: Math.min(
-                  m.beat + m.length,
-                  Math.max(
-                    quantize(n.beat + n.duration, triplets.has(n.id)),
-                    quantize(n.beat, triplets.has(n.id)) + 0.25,
-                  ),
-                ),
-              }))
-              .filter(
-                (n) =>
-                  n.start < n.end &&
-                  n.beat < m.beat + m.length &&
-                  n.beat + n.duration > m.beat,
-              );
-            // Independent voices retain overlapping notes and rests without lossy truncation.
-            const voices: (typeof pieces)[] = [];
-            for (const n of pieces.sort(
-              (a, b) => a.start - b.start || a.midi - b.midi,
-            )) {
-              const voice = voices.find(
-                (v) => v.at(-1)!.end <= n.start + 0.001,
-              );
-              if (voice) voice.push(n);
-              else voices.push([n]);
-            }
-            if (!voices.length) voices.push([]);
-            const timeChanged =
-              mi === 0 ||
-              song.measures[mi - 1].beats !== m.beats ||
-              song.measures[mi - 1].beatType !== m.beatType;
-            return `<measure number="${mi + 1}"><attributes><divisions>12</divisions>${mi === 0 ? "<key><fifths>0</fifths></key>" : ""}${timeChanged ? `<time><beats>${m.beats}</beats><beat-type>${m.beatType}</beat-type></time>` : ""}${mi === 0 ? `<clef><sign>${pi === 0 ? "G" : "F"}</sign><line>${pi === 0 ? 2 : 4}</line></clef>` : ""}</attributes>${
-              pi === 0
-                ? song.tempos
-                    .filter(
-                      (t) => t.beat >= m.beat && t.beat < m.beat + m.length,
-                    )
-                    .map(
-                      (t) =>
-                        `<direction><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${Math.round(t.bpm)}</per-minute></metronome></direction-type><offset>${Math.round((t.beat - m.beat) * 12)}</offset><sound tempo="${t.bpm}"/></direction>`,
-                    )
-                    .join("")
-                : ""
-            }${voices
-              .map((voice, vi) => {
-                let cursor = m.beat;
-                const rest = (d: number) =>
-                  `<note><rest/><duration>${Math.round(d * 12)}</duration><voice>${vi + 1}</voice></note>`;
-                let body = vi
-                  ? `<backup><duration>${Math.round(m.length * 12)}</duration></backup>`
-                  : "";
-                for (const n of voice) {
-                  if (n.start > cursor + 0.001) body += rest(n.start - cursor);
-                  const pc = n.midi % 12;
-                  const step = [
-                    "C",
-                    "C",
-                    "D",
-                    "D",
-                    "E",
-                    "F",
-                    "F",
-                    "G",
-                    "G",
-                    "A",
-                    "A",
-                    "B",
-                  ][pc];
-                  const sharp = [1, 3, 6, 8, 10].includes(pc);
-                  const before = n.beat < m.beat - 0.001,
-                    after = n.beat + n.duration > m.beat + m.length + 0.001;
-                  const tuplet = n.triplet
-                    ? Math.round(n.start * 3) % 3 === 0
+    .map((hand, pi) => {
+      type Group = {
+        start: number;
+        end: number;
+        notes: Note[];
+        triplet: boolean;
+        voice: number;
+      };
+      const chords = new Map<string, Group>();
+      for (const n of song.notes) {
+        if (
+          n.hand !== hand ||
+          song.tracks.find((t) => t.id === n.track)?.role === "ignore"
+        )
+          continue;
+        const triplet = triplets.has(n.id);
+        const start = quantize(n.beat, triplet);
+        const end = Math.max(
+          start + (triplet ? 4 : 3),
+          quantize(n.beat + n.duration, triplet),
+        );
+        const key = `${start}:${end}:${triplet}`;
+        const group = chords.get(key) ?? {
+          start,
+          end,
+          notes: [],
+          triplet,
+          voice: 0,
+        };
+        group.notes.push(n);
+        chords.set(key, group);
+      }
+      const groups = [...chords.values()].sort(
+        (a, b) => a.start - b.start || b.notes[0].midi - a.notes[0].midi,
+      );
+      const ends: number[] = [];
+      for (const group of groups) {
+        // Equal onsets and lengths share one chord. Genuine overlaps keep a stable
+        // voice across the whole piece, so barline ties cannot change voice number.
+        let voice = ends.findIndex((end) => end <= group.start);
+        if (voice < 0) voice = ends.length;
+        ends[voice] = group.end;
+        group.voice = voice + 1;
+        group.notes.sort((a, b) => a.midi - b.midi);
+      }
+      return `<part id="P${pi}">${song.measures
+        .map((m, mi) => {
+          const begin = Math.round(m.beat * 12),
+            finish = Math.round((m.beat + m.length) * 12);
+          const voices = new Map<number, Group[]>();
+          for (const group of groups) {
+            if (group.start >= finish || group.end <= begin) continue;
+            const voice = voices.get(group.voice) ?? [];
+            voice.push(group);
+            voices.set(group.voice, voice);
+          }
+          if (!voices.size) voices.set(1, []);
+          const timeChanged =
+            mi === 0 ||
+            song.measures[mi - 1].beats !== m.beats ||
+            song.measures[mi - 1].beatType !== m.beatType;
+          return `<measure number="${mi + 1}"><attributes><divisions>12</divisions>${mi === 0 ? "<key><fifths>0</fifths></key>" : ""}${timeChanged ? `<time><beats>${m.beats}</beats><beat-type>${m.beatType}</beat-type></time>` : ""}${mi === 0 ? `<clef><sign>${pi === 0 ? "G" : "F"}</sign><line>${pi === 0 ? 2 : 4}</line></clef>` : ""}</attributes>${
+            pi === 0
+              ? song.tempos
+                  .filter((t) => t.beat >= m.beat && t.beat < m.beat + m.length)
+                  .map(
+                    (t) =>
+                      `<direction><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${Math.round(t.bpm)}</per-minute></metronome></direction-type><offset>${Math.round((t.beat - m.beat) * 12)}</offset><sound tempo="${t.bpm}"/></direction>`,
+                  )
+                  .join("")
+              : ""
+          }${[...voices]
+            .sort(([a], [b]) => a - b)
+            .map(([voice, entries], vi) => {
+              let cursor = begin;
+              const rest = (ticks: number) =>
+                fragments(ticks)
+                  .map(
+                    (value) =>
+                      `<note><rest/><duration>${value.ticks}</duration><voice>${voice}</voice>${noteType(value)}</note>`,
+                  )
+                  .join("");
+              let body = vi
+                ? `<backup><duration>${finish - begin}</duration></backup>`
+                : "";
+              for (const group of entries) {
+                const start = Math.max(begin, group.start),
+                  end = Math.min(finish, group.end);
+                if (start > cursor) body += rest(start - cursor);
+                let at = start;
+                for (const value of fragments(end - start, group.triplet)) {
+                  const before = at > group.start,
+                    after = at + value.ticks < group.end;
+                  const tuplet = group.triplet
+                    ? at % 12 === 0
                       ? '<tuplet type="start" number="1"/>'
-                      : Math.round(n.end * 3) % 3 === 0
+                      : (at + value.ticks) % 12 === 0
                         ? '<tuplet type="stop" number="1"/>'
                         : ""
                     : "";
-                  body += `<note><pitch><step>${step}</step>${sharp ? "<alter>1</alter>" : ""}<octave>${Math.floor(n.midi / 12) - 1}</octave></pitch><duration>${Math.round((n.end - n.start) * 12)}</duration>${before ? '<tie type="stop"/>' : ""}${after ? '<tie type="start"/>' : ""}<voice>${vi + 1}</voice>${n.triplet ? "<type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes><normal-type>eighth</normal-type></time-modification>" : ""}${before || after || tuplet || n.finger ? `<notations>${before ? '<tied type="stop"/>' : ""}${after ? '<tied type="start"/>' : ""}${tuplet}${n.finger && !before ? `<technical><fingering>${n.finger}</fingering></technical>` : ""}</notations>` : ""}</note>`;
-                  cursor = n.end;
+                  body += group.notes
+                    .map((n, ni) => {
+                      const pc = n.midi % 12,
+                        step = [
+                          "C",
+                          "C",
+                          "D",
+                          "D",
+                          "E",
+                          "F",
+                          "F",
+                          "G",
+                          "G",
+                          "A",
+                          "A",
+                          "B",
+                        ][pc];
+                      return `<note>${ni ? "<chord/>" : ""}<pitch><step>${step}</step>${[1, 3, 6, 8, 10].includes(pc) ? "<alter>1</alter>" : ""}<octave>${Math.floor(n.midi / 12) - 1}</octave></pitch><duration>${value.ticks}</duration>${before ? '<tie type="stop"/>' : ""}${after ? '<tie type="start"/>' : ""}<voice>${voice}</voice>${noteType(value)}${before || after || tuplet || n.finger ? `<notations>${before ? '<tied type="stop"/>' : ""}${after ? '<tied type="start"/>' : ""}${tuplet}${n.finger && !before ? `<technical><fingering>${n.finger}</fingering></technical>` : ""}</notations>` : ""}</note>`;
+                    })
+                    .join("");
+                  at += value.ticks;
                 }
-                if (cursor < m.beat + m.length - 0.001)
-                  body += rest(m.beat + m.length - cursor);
-                return body;
-              })
-              .join("")}</measure>`;
-          })
-          .join("")}</part>`,
-    )
+                cursor = end;
+              }
+              if (cursor < finish) body += rest(finish - cursor);
+              return body;
+            })
+            .join("")}</measure>`;
+        })
+        .join("")}</part>`;
+    })
     .join("")}</score-partwise>`;
 }

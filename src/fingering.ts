@@ -1,6 +1,67 @@
 import { parseMusicXml } from "./importer";
 import { beatToSeconds, practiceNotes, type Song } from "./model";
 import type { FingerNote, FingerResult, HandSize } from "./vendor/pianoplayer";
+
+// Simplify the display copy only; the saved score keeps every fingering.
+export function compactChordFingerings(doc: Document, split = 60) {
+  const parts = [...doc.querySelectorAll("score-partwise > part")];
+  const pitch = (note: Element) => {
+    const p = note.querySelector("pitch")!;
+    return (
+      (Number(p.querySelector("octave")?.textContent ?? 4) + 1) * 12 +
+      ({ C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[
+        p.querySelector("step")?.textContent ?? "C"
+      ] ?? 0) +
+      Number(p.querySelector("alter")?.textContent ?? 0)
+    );
+  };
+  parts.forEach((part, partIndex) => {
+    const hasStaff = !!part.querySelector("staff");
+    let divisions = 1;
+    for (const measure of part.querySelectorAll("measure")) {
+      const chords = new Map<string, { left: boolean; notes: Element[] }>();
+      let cursor = 0,
+        chordStart = 0;
+      for (const note of measure.children) {
+        if (note.localName === "attributes")
+          divisions = Number(
+            note.querySelector("divisions")?.textContent ?? divisions,
+          );
+        const duration =
+          Number(note.querySelector("duration")?.textContent ?? 0) / divisions;
+        if (note.localName === "backup") cursor -= duration;
+        if (note.localName === "forward") cursor += duration;
+        if (note.localName !== "note" || note.querySelector("grace")) continue;
+        const start = note.querySelector("chord") ? chordStart : cursor;
+        if (!note.querySelector("chord")) {
+          chordStart = cursor;
+          cursor += duration;
+        }
+        if (!note.querySelector("pitch") || !note.querySelector("fingering"))
+          continue;
+        const left =
+          parts.length > 1
+            ? partIndex > 0
+            : hasStaff
+              ? Number(note.querySelector("staff")?.textContent ?? 1) > 1
+              : pitch(note) < split;
+        const key = `${start.toFixed(6)}:${left}`;
+        const group = chords.get(key) ?? { left, notes: [] };
+        group.notes.push(note);
+        chords.set(key, group);
+      }
+      for (const { left, notes } of chords.values()) {
+        notes.sort((a, b) => pitch(a) - pitch(b));
+        const anchor = left ? notes[0] : notes.at(-1);
+        for (const note of notes)
+          if (note !== anchor)
+            for (const fingering of note.querySelectorAll("fingering"))
+              fingering.remove();
+      }
+    }
+  });
+}
+
 export function fingeringInput(song: Song, split: number): FingerNote[] {
   const original = parseMusicXml(song.xml, song.title).notes;
   return practiceNotes(song, { hand: "both", split }).map((n) => ({

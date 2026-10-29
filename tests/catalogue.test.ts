@@ -88,6 +88,30 @@ it.skipIf(!fs.existsSync("src/personal-catalogue.json"))(
       expect(song.notes.some((n) => n.hand === "left")).toBe(true);
       expect(song.warning).toContain("自动转谱");
       expect(entry.license).not.toContain("CC0");
+      const score = parseMusicXml(song.xml, song.title);
+      expect(score.notes.length, entry.title).toBe(song.notes.length);
+      const source = [...song.notes].sort(
+        (a, b) =>
+          a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
+      );
+      const shown = [...score.notes].sort(
+        (a, b) =>
+          a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
+      );
+      for (const [i, note] of source.entries()) {
+        expect(
+          [shown[i].midi, shown[i].hand],
+          `${entry.title} 第 ${note.measure + 1} 小节`,
+        ).toEqual([note.midi, note.hand]);
+        expect(Math.abs(shown[i].beat - note.beat)).toBeLessThanOrEqual(
+          0.125001,
+        );
+        expect(
+          Math.abs(
+            shown[i].beat + shown[i].duration - note.beat - note.duration,
+          ),
+        ).toBeLessThanOrEqual(0.125001);
+      }
     }
   },
 );

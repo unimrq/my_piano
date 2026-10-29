@@ -77,7 +77,59 @@ async function library(page) {
       await page.reload();
       await page.locator(".music-card").first().waitFor();
       const restored = await library(page);
-      assert.equal(restored.songs.find((s) => s.id === song.id).xml, song.xml);
+      const restoredSong = restored.songs.find((s) => s.id === song.id);
+      assert.deepEqual(
+        restoredSong.notes.map((n) => [
+          n.id,
+          n.midi,
+          n.beat,
+          n.duration,
+          n.finger,
+        ]),
+        song.notes.map((n) => [n.id, n.midi, n.beat, n.duration, n.finger]),
+      );
+      assert.equal(
+        restoredSong.xml.match(/<fingering>/g).length,
+        song.xml.match(/<fingering>/g).length,
+      );
+      const porcelain = page
+        .locator(".music-card")
+        .filter({ hasText: "青花瓷" });
+      if (await porcelain.count()) await porcelain.click();
+      else await page.locator(".music-card").first().click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".sheet-host")?.getAttribute("aria-busy") ===
+            "false" &&
+          document.querySelector(".sheet-host text[data-fingering-row]"),
+      );
+      assert.equal(
+        await page.locator(".sheet-host svg").count(),
+        1,
+        "重画后不能遗留旧 SVG",
+      );
+      const drawing = await page.locator(".sheet-host svg").elementHandle();
+      await page.getByLabel("曲谱区域高度", { exact: true }).focus();
+      await page.getByLabel("曲谱区域高度", { exact: true }).press("End");
+      await page.waitForTimeout(350);
+      assert(
+        await drawing.evaluate((svg) => svg.isConnected),
+        "改变高度应复用同一份矢量谱",
+      );
+      const geometry = await page.locator(".sheet").evaluate((sheet) => {
+        const outer = sheet.getBoundingClientRect(),
+          svg = sheet.querySelector("svg").getBoundingClientRect();
+        return { top: svg.top - outer.top, bottom: outer.bottom - svg.bottom };
+      });
+      assert(
+        geometry.top >= 0 &&
+          geometry.bottom >= 0 &&
+          Math.abs(geometry.top - geometry.bottom) < 6,
+        JSON.stringify(geometry),
+      );
+      await page.screenshot({
+        path: path.join(artifacts, `谱面排版-${name}.png`),
+      });
       if (name === "chromium") {
         await page.evaluate(() => navigator.serviceWorker.ready);
         await page.waitForFunction(() => !!navigator.serviceWorker.controller);
@@ -107,6 +159,8 @@ async function library(page) {
           worker: true,
           reload: true,
           offline: name === "chromium",
+          oneSvg: true,
+          resizeWithoutReengraving: true,
           passed: true,
         }),
       );

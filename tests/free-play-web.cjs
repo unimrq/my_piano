@@ -130,6 +130,23 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           document.querySelector('[aria-label="上升音符"]').dataset.notes ===
           "0",
       );
+      await page.evaluate(() => [24, 103].forEach((m) => window.note(m, 100)));
+      await page.waitForFunction(
+        () =>
+          Number(document.querySelector(".free-play").dataset.visibleWhites) >
+          40,
+      );
+      await page.evaluate(() => {
+        [24, 103].forEach((m) => window.note(m, 0));
+        window.note(64, 100);
+      });
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".free-play").dataset.visibleWhites === "21",
+        undefined,
+        { timeout: 12000 },
+      );
+      await page.evaluate(() => window.note(64, 0));
       await page.getByRole("button", { name: "曲库", exact: true }).click();
       // The selected mode belongs only to this song, and survives a browser reload.
       await page.reload();
@@ -148,6 +165,33 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
       await page.getByLabel("下落音符", { exact: true }).waitFor();
       assert.equal(await plot.count(), 0);
       assert.equal(await page.locator(".song-name").textContent(), title);
+      await page.getByTitle("更多设置", { exact: true }).click();
+      await page.getByRole("tab", { name: "设备", exact: true }).click();
+      await page.getByRole("button", { name: "连接钢琴", exact: true }).click();
+      await page.getByLabel("MIDI 输入").selectOption("free-in");
+      await page.locator(".panel-heading button").click();
+      await page.waitForTimeout(250);
+      const initialKeys = Number(
+        await page
+          .locator(".roll-keyboard")
+          .getAttribute("data-visible-whites"),
+      );
+      await page.evaluate(() => [24, 103].forEach((m) => window.note(m, 100)));
+      await page.waitForFunction(
+        () =>
+          Number(
+            document.querySelector(".roll-keyboard").dataset.visibleWhites,
+          ) > 40,
+      );
+      await page.evaluate(() => [24, 103].forEach((m) => window.note(m, 0)));
+      await page.waitForFunction(
+        (initial) =>
+          Number(
+            document.querySelector(".roll-keyboard").dataset.visibleWhites,
+          ) <= initial,
+        initialKeys,
+        { timeout: 8000 },
+      );
       await page.getByTitle("更多设置", { exact: true }).click();
       await page.getByRole("tab", { name: "练习", exact: true }).click();
       await page.getByLabel("练习模式", { exact: true }).selectOption("free");
@@ -172,6 +216,8 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
           perSongModeSaved: true,
           switchBackToWait: true,
           otherSongUnchanged: true,
+          adaptiveKeyboard: true,
+          pausedZoomRecovery: true,
           passed: true,
         }),
       );

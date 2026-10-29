@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
+import { compactChordFingerings } from "./fingering";
 import type { Trainer, NoteFeedback } from "./trainer";
-import { OpenSheetMusicDisplay } from "opensheetmusicdisplay";
+import {
+  OpenSheetMusicDisplay,
+  SkyBottomLineBatchCalculatorBackendType,
+} from "opensheetmusicdisplay";
 export default function Sheet({
   xml,
   beat,
@@ -31,7 +35,13 @@ export default function Sheet({
   type GNote =
     OpenSheetMusicDisplay["GraphicSheet"]["MeasureList"][number][number]["staffEntries"][number]["graphicalVoiceEntries"][number]["notes"][number];
   const graphical = useRef<
-    { id: string; note: GNote; element: SVGGraphicsElement }[]
+    {
+      id: string;
+      beat: number;
+      note: GNote;
+      element: SVGGraphicsElement;
+      color?: string;
+    }[]
   >([]);
   const [marks, setMarks] = useState<
     { id: string; x: number; y: number; value: NoteFeedback }[]
@@ -88,11 +98,21 @@ export default function Sheet({
   const [renderVersion, setRenderVersion] = useState(0);
   useEffect(() => {
     if (!host.current) return;
+    const holder = host.current;
+    holder.replaceChildren();
+    holder.setAttribute("aria-busy", "true");
     let disposed = false;
     setError("");
-    const display = new OpenSheetMusicDisplay(host.current, {
+    const display = new OpenSheetMusicDisplay(holder, {
       autoResize: false,
+      autoBeam:
+        trainer.song.source === "midi" ||
+        trainer.song.warning?.startsWith("自动转谱"),
+      alignRests: 2,
       backend: "svg",
+      preferredSkyBottomLineBatchCalculatorBackend:
+        SkyBottomLineBatchCalculatorBackendType.Plain,
+      defaultColorMusic: "#1b1c20",
       drawTitle: false,
       drawSubtitle: false,
       drawComposer: false,
@@ -109,7 +129,12 @@ export default function Sheet({
     });
     api.current = display;
     display.EngravingRules.FingeringPositionFromXML = false;
+    display.EngravingRules.AlwaysSetPreferredSkyBottomLineBackendAutomatically = false;
     let timer: ReturnType<typeof setTimeout>;
+    let naturalWidth = 0,
+      naturalHeight = 0,
+      lastWidth = 0,
+      lastHeight = 0;
     const alignFingerings = () => {
       const rows = new Map<number, SVGTextElement[][]>();
       for (const measure of display.GraphicSheet.MeasureList)
@@ -152,22 +177,42 @@ export default function Sheet({
     };
     const render = () => {
       if (disposed) return;
-      display.Zoom = 1;
-      display.render();
-      alignFingerings();
-      const available = surface.current!.parentElement!.clientHeight - 24;
-      const height = host
-        .current!.querySelector("svg")!
-        .getBoundingClientRect().height;
-      if (Math.abs(height - available) > 2) {
-        display.Zoom = Math.max(0.05, Math.min(2, available / height));
+      const viewport = surface.current!.parentElement!;
+      if (
+        naturalHeight &&
+        viewport.clientWidth === lastWidth &&
+        viewport.clientHeight === lastHeight
+      )
+        return;
+      if (!naturalHeight) {
+        display.Zoom = 1;
         display.render();
         alignFingerings();
+        const svg = host.current!.querySelector("svg")!;
+        naturalWidth = svg.width.baseVal.value;
+        naturalHeight = svg.height.baseVal.value;
+        svg.setAttribute("viewBox", `0 0 ${naturalWidth} ${naturalHeight}`);
       }
+      lastWidth = viewport.clientWidth;
+      lastHeight = viewport.clientHeight;
+      // Resize the existing vector drawing instead of engraving the whole piece again.
+      const scale = Math.max(
+        0.05,
+        Math.min(2, (lastHeight - 24) / naturalHeight),
+      );
+      const svg = host.current!.querySelector("svg")!;
+      svg.setAttribute("width", String(naturalWidth * scale));
+      svg.setAttribute("height", String(naturalHeight * scale));
       const cursor = display.cursor;
       cursor.reset();
       graphical.current = [];
       const exercise = latest.current.song.notes;
+      const byPitch = new Map<number, typeof exercise>();
+      for (const note of exercise) {
+        const bucket = byPitch.get(note.midi) ?? [];
+        bucket.push(note);
+        byPitch.set(note.midi, bucket);
+      }
       const allocated = new Set<string>();
       const origin =
         host.current!.querySelector("svg")!.getBoundingClientRect().left -
@@ -180,11 +225,11 @@ export default function Sheet({
               getVFStave(): { getX(): number; getWidth(): number };
             }
           ).getVFStave();
-          const left = origin + stave.getX() * display.Zoom;
+          const left = origin + stave.getX() * scale;
           return {
             number: index + 1,
             left,
-            right: left + stave.getWidth() * display.Zoom,
+            right: left + stave.getWidth() * scale,
           };
         }),
       );
@@ -200,7 +245,7 @@ export default function Sheet({
                 const midi = note.sourceNote.Pitch.getHalfTone() + 12;
                 const onset =
                   note.sourceNote.getAbsoluteTimestamp().RealValue * 4;
-                const match = exercise
+                const match = (byPitch.get(midi) ?? [])
                   .filter(
                     (n) =>
                       n.midi === midi &&
@@ -227,7 +272,12 @@ export default function Sheet({
                 if (element) {
                   element.dataset.noteId = match.id;
                   element.dataset.measure = String(measureIndex + 1);
-                  graphical.current.push({ id: match.id, note, element });
+                  graphical.current.push({
+                    id: match.id,
+                    beat: match.beat,
+                    note,
+                    element,
+                  });
                 }
               }
       const times: number[] = [];
@@ -241,12 +291,14 @@ export default function Sheet({
       display.cursor.hide();
       position.current = -1;
       setRenderVersion((v) => v + 1);
+      holder.setAttribute("aria-busy", "false");
     };
     // Tempo is shown in the toolbar; keep the original file and note data intact.
     const displayDocument = new DOMParser().parseFromString(
       xml,
       "application/xml",
     );
+    compactChordFingerings(displayDocument, trainer.settings.split);
     for (const direction of displayDocument.querySelectorAll("direction")) {
       if (direction.querySelector("metronome, sound[tempo]"))
         for (const label of direction.querySelectorAll(
@@ -263,7 +315,10 @@ export default function Sheet({
         }
       })
       .catch((e) => {
-        if (!disposed) setError("曲谱显示失败：" + String(e));
+        if (!disposed) {
+          holder.setAttribute("aria-busy", "false");
+          setError("曲谱显示失败：" + String(e));
+        }
       });
     const observer = new ResizeObserver(() => {
       clearTimeout(timer);
@@ -277,6 +332,8 @@ export default function Sheet({
       clearTimeout(timer);
       observer.disconnect();
       display.clear();
+      holder.replaceChildren();
+      graphical.current = [];
       api.current = null;
     };
   }, [xml]);
@@ -325,20 +382,25 @@ export default function Sheet({
     const next: typeof marks = [];
     const seen = new Set<string>();
     const points = new Map<number, number>();
-    for (const item of graphical.current) {
+    // Batch geometry reads before changing colors to avoid one layout per note.
+    const boxes = graphical.current.map((item) =>
+      item.element.getBoundingClientRect(),
+    );
+    for (const [index, item] of graphical.current.entries()) {
       const value = trainer.feedback.get(item.id);
-      item.note.setColor(value ? colors[value.status] : "#1b1c20", {
-        applyToBeams: false,
-        applyToFlag: false,
-        applyToLedgerLines: false,
-      });
-      const box = item.element.getBoundingClientRect();
-      if (!box.width || !box.height) continue;
-      const n = trainer.song.notes.find((n) => n.id === item.id);
-      if (n) {
-        const x = box.left - rect.left + box.width / 2;
-        points.set(n.beat, Math.min(points.get(n.beat) ?? Infinity, x));
+      const color = value ? colors[value.status] : "#1b1c20";
+      if ((value || item.color) && item.color !== color) {
+        item.note.setColor(color, {
+          applyToBeams: false,
+          applyToFlag: false,
+          applyToLedgerLines: false,
+        });
+        item.color = color;
       }
+      const box = boxes[index];
+      if (!box.width || !box.height) continue;
+      const x = box.left - rect.left + box.width / 2;
+      points.set(item.beat, Math.min(points.get(item.beat) ?? Infinity, x));
       if (!value || seen.has(item.id)) continue;
       seen.add(item.id);
       next.push({

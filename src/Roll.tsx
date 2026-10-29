@@ -10,10 +10,7 @@ import type { Trainer } from "./trainer";
 import { FallingNotesRenderer } from "./vendor/bach/FallingNotesRenderer";
 import { PianoKeyboard } from "./vendor/bach/PianoKeyboard";
 import { midiToPitch, type NoteEvent } from "./vendor/bach/MusicData";
-
-const whites = Array.from({ length: 88 }, (_, i) => i + 21).filter(
-  (m) => ![1, 3, 6, 8, 10].includes(m % 12),
-);
+import { KeyboardRange } from "./keyboardRange";
 // Thin adapter: timing/scoring stay outside the MIT upstream renderers.
 export default function Roll({
   song,
@@ -25,11 +22,7 @@ export default function Roll({
   trainer: Trainer;
 }) {
   const [range, setRange] = useState<[number, number]>([21, 42]);
-  const rangeRef = useRef(range),
-    movedAt = useRef(-Infinity),
-    measureAt = useRef(-1);
-  rangeRef.current = range;
-  const previousMode = useRef("");
+  const viewport = useRef(new KeyboardRange());
   const surface = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null),
     rollCanvas = useRef<HTMLCanvasElement>(null),
@@ -129,73 +122,22 @@ export default function Roll({
           const time = beatToSeconds(trainer.beat, song.tempos);
           const mode = latest.current.settings.registerMode ?? "follow";
           const minimum = latest.current.settings.minWhiteKeys ?? 21;
-          const layout = `${mode}:${minimum}`;
-          const modeChanged = previousMode.current !== layout;
-          previousMode.current = layout;
-          const bar = song.measures.findLastIndex(
-            (m) => m.beat <= trainer.beat,
-          );
-          if (mode === "full") {
-            if (rangeRef.current[1] - rangeRef.current[0] !== 52)
-              setRange([0, 52]);
-          } else if (
-            mode === "lock" &&
-            rangeRef.current[1] - rangeRef.current[0] < minimum
-          ) {
-            const begin = Math.max(
-              0,
-              Math.min(
-                52 - minimum,
-                Math.floor(
-                  (rangeRef.current[0] + rangeRef.current[1] - minimum) / 2,
-                ),
-              ),
-            );
-            setRange([begin, begin + minimum]);
-          } else if (
-            mode === "follow" &&
-            (modeChanged || bar !== measureAt.current || !trainer.running)
-          ) {
-            const upcoming = notesRef.current
-              .filter((n) => n.endSeconds >= time && n.startSeconds <= time + 5)
-              .map((n) => n.midi);
-            const pitches = [
+          const upcoming = notesRef.current
+            .filter((n) => n.endSeconds >= time && n.startSeconds <= time + 5)
+            .map((n) => n.midi);
+          const before = viewport.current.range;
+          const next = viewport.current.update(
+            [
               ...upcoming,
               ...trainer.held.keys(),
               ...trainer.target.map((n) => n.midi),
-            ];
-            if (pitches.length) {
-              const low = Math.max(
-                0,
-                whites.findLastIndex((m) => m <= Math.min(...pitches)),
-              );
-              const high = Math.min(
-                51,
-                whites.findIndex((m) => m >= Math.max(...pitches)) < 0
-                  ? 51
-                  : whites.findIndex((m) => m >= Math.max(...pitches)),
-              );
-              const [left, right] = rangeRef.current;
-              const clipped = low < left || high >= right;
-              const count = Math.min(52, Math.max(minimum, high - low + 7));
-              if (
-                modeChanged ||
-                clipped ||
-                ((low < left + 2 ||
-                  high >= right - 2 ||
-                  right - left > count + 7) &&
-                  time - movedAt.current >= 8)
-              ) {
-                const begin = Math.max(
-                  0,
-                  Math.min(52 - count, Math.floor((low + high - count) / 2)),
-                );
-                setRange([begin, begin + count]);
-                movedAt.current = time;
-              }
-            }
-            measureAt.current = bar;
-          }
+            ],
+            minimum,
+            mode,
+            performance.now() / 1000,
+          );
+          if (next !== before) setRange(next);
+          let redraw = time !== last.current;
           if (time < last.current - 0.001) {
             falling.reset();
             spawned.current.clear();
@@ -206,9 +148,10 @@ export default function Roll({
             if (n.endSeconds >= time - 0.1 && !spawned.current.has(n.id)) {
               falling.addNote(n, time);
               spawned.current.add(n.id);
+              redraw = true;
             }
           }
-          falling.tick(time);
+          if (redraw) falling.tick(time);
           const guide =
             trainer.settings.mode === "listen"
               ? []
@@ -264,6 +207,7 @@ export default function Roll({
         keyCanvas.current!.style.flexBasis = `${keyHeight()}px`;
         spawned.current.clear();
         held.current.clear();
+        last.current = -Infinity;
       }
     });
     observer.observe(surface.current!);
@@ -287,8 +231,7 @@ export default function Roll({
     spawned.current.clear();
     held.current.clear();
     last.current = -Infinity;
-    movedAt.current = -Infinity;
-    measureAt.current = -1;
+    viewport.current.reset();
     roll.current?.setOptions({
       measureStarts: song.measures.map((m) =>
         beatToSeconds(m.beat, song.tempos),

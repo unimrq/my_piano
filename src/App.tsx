@@ -16,7 +16,7 @@ import { Trainer } from "./trainer";
 import { MidiDevices } from "./midi";
 import { importScore } from "./importer";
 import { makeXml } from "./notation";
-import { generateFingering } from "./fingering";
+import { applyFingering, generateFingering } from "./fingering";
 import type { HandSize } from "./vendor/pianoplayer";
 import Sheet from "./Sheet";
 import Roll from "./Roll";
@@ -90,6 +90,14 @@ export default function App() {
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const song = library.songs.find((s) => s.id === songId) ?? library.songs[0];
+  const missingFingers =
+    song.notes.length > 0 &&
+    !song.notes.some((n) => n.finger) &&
+    !/<fingering[\s>]/.test(song.xml);
+  const preparingScore =
+    !freePlay &&
+    missingFingers &&
+    (!fingerAttempts.current.has(song.id) || busy);
   const libRef = useRef(library),
     settingsRef = useRef(settings);
   libRef.current = library;
@@ -240,18 +248,46 @@ export default function App() {
         if (replacing) await backupBrowserLibrary(saved!);
         const previous = saved;
         const byId = new Map(previous?.songs.map((s) => [s.id, s]) ?? []);
-        const merged = bundled.map((s) =>
-          byId.has(s.id) ? { ...s, tracks: byId.get(s.id)!.tracks } : s,
-        );
+        const merged = bundled.map((s) => {
+          const previous = byId.get(s.id);
+          if (!previous) return s;
+          const next = { ...s, tracks: previous.tracks };
+          const fingers = new Map(previous.notes.map((n) => [n.id, n]));
+          next.notes = s.notes.map((n) => {
+            const saved = fingers.get(n.id);
+            return saved?.midi === n.midi &&
+              saved.beat === n.beat &&
+              saved.duration === n.duration
+              ? { ...n, finger: n.finger ?? saved.finger }
+              : n;
+          });
+          if (s.warning?.startsWith("自动转谱")) {
+            next.xml = makeXml(next);
+          } else if (next.notes.some((n) => n.finger)) {
+            return applyFingering(next, {
+              fingers: Object.fromEntries(
+                next.notes
+                  .filter((n) => n.finger)
+                  .map((n) => [n.id, n.finger!]),
+              ),
+              skipped: 0,
+            });
+          }
+          return next;
+        });
         const songs = [
           ...merged,
-          ...(previous?.songs.filter(
-            (s) =>
-              (!replacing ||
-                s.source !== "builtin" ||
-                s.id.startsWith("daily-")) &&
-              !merged.some((b) => b.id === s.id),
-          ) ?? []),
+          ...(previous?.songs
+            .filter(
+              (s) =>
+                (!replacing ||
+                  s.source !== "builtin" ||
+                  s.id.startsWith("daily-")) &&
+                !merged.some((b) => b.id === s.id),
+            )
+            .map((s) =>
+              s.source === "midi" ? { ...s, xml: makeXml(s) } : s,
+            ) ?? []),
         ];
         const selected =
           songs.find((s) => s.id === previous?.lastSong) ?? songs[0];
@@ -483,7 +519,7 @@ export default function App() {
         finishRef.current();
       }
       lastFrame.current = now;
-      if (!homeRef.current && now - previousDraw > 32) {
+      if (!homeRef.current && e.running && now - previousDraw > 32) {
         refresh((v) => v + 1);
         previousDraw = now;
       }
@@ -621,9 +657,7 @@ export default function App() {
       home ||
       !ready ||
       busy ||
-      !song.notes.length ||
-      song.notes.some((n) => n.finger) ||
-      /<fingering[\s>]/.test(song.xml) ||
+      !missingFingers ||
       fingerAttempts.current.has(song.id)
     )
       return;
@@ -797,32 +831,40 @@ export default function App() {
           <section
             className="sheet"
             style={{ height: `${settings.sheetHeight}%` }}
+            aria-busy={preparingScore}
           >
-            <Sheet
-              xml={song.xml}
-              beat={Math.max(e.start, e.beat)}
-              trainer={e}
-              loopTool={freePlay ? false : loopTool}
-              onLoop={([from, to]) => {
-                const running = engine.current.running;
-                configure({ from, to, loop: true });
-                if (running) engine.current.startRun(performance.now(), false);
-                setLoopTool(false);
-              }}
-              onSeek={(beat) =>
-                configure({
-                  from:
-                    (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                      0) + 1,
-                  to: Math.max(
-                    settings.to,
-                    (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                      0) + 1,
-                  ),
-                  startBeat: beat,
-                })
-              }
-            />
+            {preparingScore ? (
+              <div className="sheet-loading" role="status">
+                正在准备曲谱…
+              </div>
+            ) : (
+              <Sheet
+                xml={song.xml}
+                beat={Math.max(e.start, e.beat)}
+                trainer={e}
+                loopTool={freePlay ? false : loopTool}
+                onLoop={([from, to]) => {
+                  const running = engine.current.running;
+                  configure({ from, to, loop: true });
+                  if (running)
+                    engine.current.startRun(performance.now(), false);
+                  setLoopTool(false);
+                }}
+                onSeek={(beat) =>
+                  configure({
+                    from:
+                      (song.measures.findLast((m) => m.beat <= beat)?.index ??
+                        0) + 1,
+                    to: Math.max(
+                      settings.to,
+                      (song.measures.findLast((m) => m.beat <= beat)?.index ??
+                        0) + 1,
+                    ),
+                    startBeat: beat,
+                  })
+                }
+              />
+            )}
           </section>
           <input
             className="resize"

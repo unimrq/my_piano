@@ -735,6 +735,13 @@ main {
   background: #f9d3c8;
   color: #9c9ca6;
 }
+.sheet-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #88858f;
+  font-size: 13px;
+}
 .resize {
   height: 10px;
   margin: 0;

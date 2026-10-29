@@ -54,7 +54,7 @@ describe("离线导入", () => {
       duration: 1,
     });
     const doc = new DOMParser().parseFromString(song.xml, "application/xml");
-    expect(doc.querySelectorAll("note > type")).toHaveLength(3);
+    expect(doc.querySelectorAll("note > time-modification")).toHaveLength(3);
     for (const note of doc.querySelectorAll("time-modification")) {
       expect(note.querySelector("actual-notes")?.textContent).toBe("3");
       expect(note.querySelector("normal-notes")?.textContent).toBe("2");
@@ -79,6 +79,52 @@ describe("离线导入", () => {
     expect(song.xml).not.toContain("time-modification");
     expect(song.notes[0].beat).toBeCloseTo(1 / 3, 10);
     expect(song.notes[0].duration).toBeCloseTo(1 / 3, 10);
+  });
+  it("同时同长的音合为和弦，跨小节长音不改变声部或多出起音", () => {
+    const midi = new Midi();
+    const ppq = midi.header.ppq;
+    const track = midi.addTrack();
+    for (const pitch of [84, 88])
+      track.addNote({ midi: pitch, ticks: 0, durationTicks: ppq / 2 });
+    track.addNote({ midi: 84, ticks: ppq * 3, durationTicks: ppq });
+    track.addNote({ midi: 72, ticks: ppq * 3.5, durationTicks: ppq * 6.5 });
+    track.addNote({ midi: 76, ticks: ppq * 4, durationTicks: ppq });
+    const song = importScore("和弦延音.mid", midi.toArray());
+    const before = structuredClone(song.notes);
+    const score = parseMusicXml(song.xml, song.title);
+    const timing = (notes: typeof song.notes) =>
+      notes
+        .map((n) => [n.midi, n.beat, n.duration])
+        .sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+    expect(timing(score.notes)).toEqual(timing(song.notes));
+    expect(score.notes.filter((n) => n.midi === 72)).toHaveLength(1);
+    expect(score.notes.find((n) => n.midi === 72)?.duration).toBe(6.5);
+    const doc = new DOMParser().parseFromString(song.xml, "application/xml");
+    expect(doc.querySelectorAll("chord")).toHaveLength(1);
+    const chord = doc.querySelector("chord")!.parentElement!;
+    expect(chord.querySelector("voice")?.textContent).toBe(
+      chord.previousElementSibling!.querySelector("voice")?.textContent,
+    );
+    expect(song.notes).toEqual(before);
+  });
+  it("非标准组合时值拆为合法音符并连线，量化跨小节边界不丢音", () => {
+    const midi = new Midi();
+    const ppq = midi.header.ppq;
+    const track = midi.addTrack();
+    track.addNote({ midi: 72, ticks: 0, durationTicks: ppq * 2.75 });
+    track.addNote({ midi: 76, ticks: ppq * 3.95, durationTicks: ppq * 0.5 });
+    const song = importScore("量化边界.mid", midi.toArray());
+    const score = parseMusicXml(song.xml, song.title);
+    expect(score.notes.map((n) => [n.midi, n.beat, n.duration])).toEqual([
+      [72, 0, 2.75],
+      [76, 4, 0.5],
+    ]);
+    const doc = new DOMParser().parseFromString(song.xml, "application/xml");
+    expect(doc.querySelectorAll("time-modification")).toHaveLength(0);
+    expect(doc.querySelectorAll('tie[type="start"]').length).toBeGreaterThan(0);
+    expect(
+      [...doc.querySelectorAll("note")].every((n) => n.querySelector("type")),
+    ).toBe(true);
   });
   it("空 MIDI 与损坏文件明确失败", () => {
     expect(() => importScore("empty.mid", new Midi().toArray())).toThrow(
