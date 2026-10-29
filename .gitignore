@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+*.log
+test-results/
+docs/*.png
+docs/*-smoke.json
+docs/installation-check.json
+src/personal-catalogue.json
+public/catalogue/personal-*.mid

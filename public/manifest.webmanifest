@@ -1,0 +1,11 @@
+{
+  "name": "钢琴练习",
+  "short_name": "钢琴练习",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101012",
+  "theme_color": "#101012",
+  "icons": [{ "src": "./icon.png", "sizes": "256x256", "type": "image/png" }]
+}

@@ -1,0 +1,10 @@
+piano.example.com {
+    root * /srv/my_piano/dist
+    encode zstd gzip
+    header {
+        Cache-Control "no-cache"
+        X-Content-Type-Options "nosniff"
+        Permissions-Policy "midi=(self), fullscreen=(self)"
+    }
+    file_server
+}

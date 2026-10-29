@@ -1,0 +1,39 @@
+{
+  "name": "qinxi-piano",
+  "version": "0.2.0",
+  "private": true,
+  "description": "钢琴练习 · 离线网页 MIDI 练习",
+  "author": "Personal Piano Project",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "npm run licenses && tsc --noEmit && vite build",
+    "test": "vitest run",
+    "preview": "vite preview --host 127.0.0.1",
+    "licenses": "node scripts/licenses.cjs",
+    "web": "node scripts/web-server.cjs",
+    "test:web": "node tests/web-smoke.cjs",
+    "test:toolbar": "node tests/web-toolbar.cjs"
+  },
+  "devDependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "fflate": "^0.8.2",
+    "jsdom": "^27.4.0",
+    "opensheetmusicdisplay": "^1.9.2",
+    "pixi.js": "^8.18.1",
+    "playwright": "^1.58.0",
+    "prettier": "^3.9.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.18"
+  }
+}
