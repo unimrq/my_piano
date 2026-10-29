@@ -122,6 +122,11 @@ export function parseMusicXml(text: string, title: string): Song {
     tempos: Tempo[] = [{ beat: 0, bpm: 100 }];
   let count = 0,
     warning = "";
+  const xmlIndices = new Map(
+    Array.from(doc.querySelectorAll("part > measure > note")).map(
+      (el, index) => [el, index],
+    ),
+  );
   parts.forEach((part, track) => {
     const partId = part.getAttribute("id");
     const name =
@@ -220,6 +225,12 @@ export function parseMusicXml(text: string, title: string): Song {
               );
             else {
               const n: Note = {
+                xmlIndex: xmlIndices.get(el),
+                finger: /^[1-5]$/.test(
+                  el.querySelector("fingering")?.textContent?.trim() ?? "",
+                )
+                  ? Number(el.querySelector("fingering")!.textContent)
+                  : undefined,
                 id: `x${count++}`,
                 midi,
                 beat: base + start,

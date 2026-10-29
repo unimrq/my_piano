@@ -15,3 +15,5 @@
 此前 POP909 的 10 首旋律轨自行简化片段已撤下。历史来源为 [Music X Lab / POP909](https://github.com/music-x-lab/POP909-Dataset)，ISMIR 2020，作者 Ziyu Wang, Ke Chen, Junyan Jiang, Yiyi Zhang, Maoran Xu, Shuqi Dai, Guxian Bin, Gus Xia；仓库 MIT 正文仍保留于 `public/licenses/POP909-MIT.txt` 用于追溯，仓库许可不代表原歌曲权利。此前 PianoBooster/Mutopia 和自制示范曲也不属于当前内置曲库，相关历史许可证保留。
 
 每日视奏是本项目确定性算法生成的原创练习，CC0-1.0；不是 POP909 曲目或其他平台挑战题。
+
+自动指法：复用 [PianoPlayer](https://github.com/marcomusy/pianoplayer) 的手部静息几何、手指强度、黑键成本与移动成本思路，适配为浏览器 TypeScript（src/vendor/pianoplayer.ts）。Copyright (c) 2017 Marco Musy，完整 MIT 许可位于 public/licenses/PianoPlayer-MIT.txt，随静态构建提供。此适配使用有界 beam search 对整组和弦搜索并处理仍按住的键，不是上游 Python 引擎的逐行移植，也不宣称与其结果相同。左右手分别求解、保留原谱指法，超出五指或手掌跨度且无法分配的组留空；不依赖 Python、远程 API 或收费模型。

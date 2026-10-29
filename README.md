@@ -70,3 +70,9 @@ npm run test:toolbar
 浏览器检查使用 Chromium / WebKit 和模拟 MIDI；真实 FP-30X 发声、持续练习和 iPad 兼容性需另行试弹。验证边界见 [验证报告](docs/验证报告.md)。
 
 应用使用 React、TypeScript、PixiJS 与 OpenSheetMusicDisplay，复用 Bach to Basics 的渲染和 MIDI 相关代码，无 Python 服务和远程转换 API。输入、解析和判定独立于界面；第三方许可见 [NOTICE.md](NOTICE.md)、[LICENSE.upstream](LICENSE.upstream) 和 [LICENSES.third-party.txt](LICENSES.third-party.txt)。
+
+## 自动指法
+
+导入确认页默认勾选“自动生成缺失指法”。已有曲目可在练习设置 → 自动指法中选择手掌大小，点击“生成缺失指法”。生成在浏览器后台完成，结果写入五线谱并保存在当前浏览器，离线缓存完成后也可生成，无需服务器计算。已有指法保留，伴奏和忽略声部不参与。先确认左右手声部分配；修改声部后已有标注不会自动重新规划。
+
+数字 1～5 分别代表拇指至小指。建议算法改编自 PianoPlayer，按手部移动成本搜索，不保证等同教师或出版谱指法。超出五指、跨度或与原标注冲突而无法分配的音组保留空白，不强行标注。当前最多处理两万音；不自动处理交叉手或识别实际使用的手指。当前入口是“补全缺失”，再次点击会保留上一次生成的结果。

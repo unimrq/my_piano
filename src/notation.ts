@@ -127,7 +127,7 @@ export function makeXml(
                         ? '<tuplet type="stop" number="1"/>'
                         : ""
                     : "";
-                  body += `<note><pitch><step>${step}</step>${sharp ? "<alter>1</alter>" : ""}<octave>${Math.floor(n.midi / 12) - 1}</octave></pitch><duration>${Math.round((n.end - n.start) * 12)}</duration>${before ? '<tie type="stop"/>' : ""}${after ? '<tie type="start"/>' : ""}<voice>${vi + 1}</voice>${n.triplet ? "<type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes><normal-type>eighth</normal-type></time-modification>" : ""}${before || after || tuplet ? `<notations>${before ? '<tied type="stop"/>' : ""}${after ? '<tied type="start"/>' : ""}${tuplet}</notations>` : ""}</note>`;
+                  body += `<note><pitch><step>${step}</step>${sharp ? "<alter>1</alter>" : ""}<octave>${Math.floor(n.midi / 12) - 1}</octave></pitch><duration>${Math.round((n.end - n.start) * 12)}</duration>${before ? '<tie type="stop"/>' : ""}${after ? '<tie type="start"/>' : ""}<voice>${vi + 1}</voice>${n.triplet ? "<type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes><normal-type>eighth</normal-type></time-modification>" : ""}${before || after || tuplet || n.finger ? `<notations>${before ? '<tied type="stop"/>' : ""}${after ? '<tied type="start"/>' : ""}${tuplet}${n.finger && !before ? `<technical><fingering>${n.finger}</fingering></technical>` : ""}</notations>` : ""}</note>`;
                   cursor = n.end;
                 }
                 if (cursor < m.beat + m.length - 0.001)

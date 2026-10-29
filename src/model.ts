@@ -1,6 +1,8 @@
 export type Role = "right" | "left" | "backing" | "ignore" | "split" | "staff";
 export type Hand = "right" | "left" | "both";
 export interface Note {
+  finger?: number;
+  xmlIndex?: number;
   id: string;
   midi: number;
   beat: number;
@@ -127,7 +129,7 @@ export function roleNote(n: Note, song: Song, split: number): Note {
               : "right",
   };
 }
-export function practiceNotes(song: Song, s: Settings) {
+export function practiceNotes(song: Song, s: Pick<Settings, "hand" | "split">) {
   return song.notes
     .filter((n) => {
       const r = song.tracks.find((t) => t.id === n.track)?.role;

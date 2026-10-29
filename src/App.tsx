@@ -18,6 +18,8 @@ import { Trainer } from "./trainer";
 import { MidiDevices } from "./midi";
 import { importScore } from "./importer";
 import { makeXml } from "./notation";
+import { generateFingering } from "./fingering";
+import type { HandSize } from "./vendor/pianoplayer";
 import Sheet from "./Sheet";
 import Roll from "./Roll";
 import LibraryHome from "./LibraryHome";
@@ -55,6 +57,9 @@ const initial = (): Library => ({
   lastSong: "loading",
 });
 export default function App() {
+  const [handSize, setHandSize] = useState<HandSize>("M");
+  const [autoFingers, setAutoFingers] = useState(true);
+  const [fingerStatus, setFingerStatus] = useState("");
   const [home, setHome] = useState(true);
   const [settingsTab, setSettingsTab] = useState<
     "practice" | "device" | "display"
@@ -90,6 +95,7 @@ export default function App() {
   const devices = useRef<MidiDevices | null>(null);
   const songRef = useRef(song);
   songRef.current = song;
+  useEffect(() => setFingerStatus(""), [songId]);
   const [, devicesChanged] = useState(0);
   const audible = useMemo(
     () => playbackNotes(song, settings),
@@ -591,9 +597,15 @@ export default function App() {
     if (!pending) return;
     setBusy(true);
     try {
-      const s = pending.song;
+      let s = { ...pending.song };
       s.notes = s.notes.map((n) => roleNote(n, s, settings.split));
       if (s.source === "midi") s.xml = makeXml(s);
+      if (autoFingers) {
+        const generated = await generateFingering(s, settings.split, handSize);
+        s = generated.song;
+        if (generated.skipped)
+          setNotice(`${generated.skipped} 个音超出指法可分配范围，保留空白`);
+      }
       const next = {
         ...libRef.current,
         songs: [...libRef.current.songs, s],
@@ -606,6 +618,36 @@ export default function App() {
       choose(s);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function addFingers() {
+    pause();
+    setBusy(true);
+    setFingerStatus("正在生成…");
+    try {
+      const generated = await generateFingering(song, settings.split, handSize);
+      if (libRef.current.songs.find((s) => s.id === song.id) !== song)
+        throw Error("曲谱已更改，请重新生成指法");
+      const next = {
+        ...libRef.current,
+        songs: libRef.current.songs.map((s) =>
+          s.id === song.id ? generated.song : s,
+        ),
+      };
+      await save(next);
+      if (saveError.current) throw Error("指法未能保存，请重试");
+      setLibrary(next);
+      if (songRef.current.id === song.id)
+        reset(generated.song, settingsRef.current);
+      setFingerStatus(
+        generated.skipped
+          ? `已生成；${generated.skipped} 个音超出可分配范围，保留空白`
+          : "已生成并保存",
+      );
+    } catch (error) {
+      setFingerStatus(String(error));
     } finally {
       setBusy(false);
     }
@@ -996,6 +1038,31 @@ export default function App() {
                         </label>
                       </div>
                     </section>
+                    <details className="settings-advanced">
+                      <summary>自动指法</summary>
+                      <label className="field">
+                        手掌大小
+                        <select
+                          aria-label="手掌大小"
+                          value={handSize}
+                          onChange={(e) =>
+                            setHandSize(e.target.value as HandSize)
+                          }
+                          disabled={busy}
+                        >
+                          <option value="S">较小</option>
+                          <option value="M">中等</option>
+                          <option value="L">较大</option>
+                        </select>
+                      </label>
+                      <button disabled={busy} onClick={() => void addFingers()}>
+                        {busy ? "正在生成…" : "生成缺失指法"}
+                      </button>
+                      <p className="hint" role="status">
+                        {fingerStatus ||
+                          "本地生成建议指法，保留已有标注。请先确认左右手声部。"}
+                      </p>
+                    </details>
                   </div>
                   <div
                     role="tabpanel"
@@ -1365,6 +1432,15 @@ export default function App() {
               {pending.song.warning ||
                 "确认左右手后加入曲库；之后仍可在设置中修改。"}
             </p>
+            <label className="field check">
+              <input
+                type="checkbox"
+                checked={autoFingers}
+                disabled={busy}
+                onChange={(e) => setAutoFingers(e.target.checked)}
+              />
+              自动生成缺失指法
+            </label>
             {error && <p className="hint">{error}</p>}
             <div className="actions">
               <button disabled={busy} onClick={() => setPending(null)}>
