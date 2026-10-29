@@ -1,0 +1,12 @@
+Salamander Grand Piano samples
+Original author: Alexander Holm
+Distribution source: Tone.js audio repository
+Source: https://github.com/Tonejs/audio/tree/efd8296360f9526e379bfbe5c1698ff54d6a1d34/salamander
+Upstream README: https://raw.githubusercontent.com/Tonejs/audio/efd8296360f9526e379bfbe5c1698ff54d6a1d34/salamander/README
+License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
+License URL: https://creativecommons.org/licenses/by/3.0/
+Full license is provided in Salamander-CC-BY-3.0.txt.
+
+The 30 MP3 files in audio/piano are unchanged copies. Runtime playback may
+resample them, adjust gain, and apply release envelopes. No endorsement is implied.
+Their license is separate from the MIT license of the application source.

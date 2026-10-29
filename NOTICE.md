@@ -4,7 +4,9 @@
 
 参考并改写 Bach to Basics 的 `frontend/src/workers/midi.worker.ts` MIDI 解析流程，包括音符、力度、PPQ 与速度图提取。上游：https://github.com/gigliof/bach-to-basics ，本次核对提交 `8b6db270f36e1be1b9d2a86ebb1f59adeb1e7091`。上游版权为 Copyright (c) 2025-2026 gigliof，完整许可见 LICENSE.upstream。
 
-0.2.0 直接复用上游 FallingNotesRenderer、PianoKeyboard、colorUtils 及共享 MusicData 类型/工具。改动与适配边界见 src/vendor/bach/README.md。五线谱继续复用 OpenSheetMusicDisplay；在现有判定上新增逐音符反馈，不改变起音评分标准，MIDI 接入继续复用。未包含上游在线采样音源、Python 服务或识别模块。
+0.2.0 直接复用上游 FallingNotesRenderer、PianoKeyboard、colorUtils 及共享 MusicData 类型/工具。改动与适配边界见 src/vendor/bach/README.md。五线谱继续复用 OpenSheetMusicDisplay；在现有判定上新增逐音符反馈，不改变起音评分标准，MIDI 接入继续复用。没有上游的在线采样服务、Python 服务或识别模块。
+
+电脑端示范发声使用随网页打包的 Salamander Grand Piano MP3 采样，由 Alexander Holm 制作、Tone.js 分发，CC BY 3.0。固定来源提交为 Tonejs/audio 的 efd8296360f9526e379bfbe5c1698ff54d6a1d34；30 个音频文件原样保存，逐文件来源与 SHA-256 见 public/audio/piano/manifest.json。播放时可移调、调节增益并应用释音包络；不代表原作者对本应用的认可。这是紧凑的单采样根音版本，不是完整 16 力度层音源。原说明和署名位于 public/audio/piano/、完整许可及归属说明位于 public/licenses/Salamander-CC-BY-3.0.txt 和 Salamander-ATTRIBUTION.txt。网页代码 MIT 许可不改变这些录音的许可。
 
 网页运行依赖的许可正文汇总在 LICENSES.third-party.txt。界面使用设备本地系统字体；谱面符号字体由 OpenSheetMusicDisplay/VexFlow 内嵌，无运行时在线字体或 Electron 运行时。
 

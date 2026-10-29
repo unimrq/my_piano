@@ -145,11 +145,11 @@ async function run(engine, name) {
       await loop.tap();
       assert.equal(await loop.getAttribute("aria-pressed"), "true");
       await loop.tap();
-      await page.getByRole("button", { name: "播放", exact: true }).tap();
+      await page.getByRole("button", { name: "开始", exact: true }).tap();
       console.log(name, "started");
       await page.getByRole("button", { name: "暂停", exact: true }).tap();
       await page.getByTitle("回到第一小节", { exact: true }).tap();
-      await page.getByRole("button", { name: "播放", exact: true }).waitFor();
+      await page.getByRole("button", { name: "开始", exact: true }).waitFor();
       tested.push(viewport);
     }
     await page.getByRole("button", { name: "曲库", exact: true }).tap();

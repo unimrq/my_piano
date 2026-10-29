@@ -37,6 +37,7 @@ export default function FreePlay({
       low = 16,
       count = 21;
     let pausedAt: number | null = null;
+    let restoreKeys = false;
     const viewport = new KeyboardRange([16, 37]);
     const held = new Set<number>();
     const keys = new PianoKeyboard(input, {
@@ -84,7 +85,7 @@ export default function FreePlay({
       input.style.flexBasis = `${keyHeight}px`;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       keys.resize(width, keyHeight);
-      held.clear();
+      restoreKeys = true;
     };
     const animate = () => {
       if (disposed) return;
@@ -162,14 +163,16 @@ export default function FreePlay({
       const pressed = new Set(active.map((n) => n.midi));
       for (const midi of held) if (!pressed.has(midi)) keys.inputNoteOff(midi);
       for (const midi of pressed)
-        if (!held.has(midi))
+        if (!held.has(midi) || restoreKeys)
           keys.inputNoteOn(
             midi,
             false,
             midi < current.current.split ? "left" : "right",
+            !held.has(midi),
           );
       held.clear();
       for (const midi of pressed) held.add(midi);
+      restoreKeys = false;
       plot.dataset.active = String(active.length);
       plot.dataset.notes = String(session.notes.length);
       plot.setAttribute(

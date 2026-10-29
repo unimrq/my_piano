@@ -1429,6 +1429,21 @@ button.primary:hover {
 .toolbar button:hover {
   background: #25252b;
 }
+.toolbar button.primary:hover {
+  background: #c9b8ff;
+  color: #181320;
+}
+.toolbar select.practice-mode {
+  width: 116px;
+  height: 44px;
+  padding: 0 10px;
+  border: 1px solid #38343f;
+  border-radius: 8px;
+  background: #1c1c22;
+  color: #e2ddef;
+  color-scheme: dark;
+  font-size: 14px;
+}
 .practice-focus > header {
   background: #111114;
   border-color: #28282f;

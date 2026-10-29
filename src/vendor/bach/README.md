@@ -6,4 +6,6 @@
 
 Roll.tsx 仅转换数据并连接生命周期、尺寸和按键状态。通过 PixiJS 官方 `unsafe-eval` 兼容模块使用无需动态 eval 的实现，页面 CSP 没有增加 unsafe-eval。
 
+琴键保留独立的黑键上层，增加白键前沿、黑键倒角与轻投影，按压位移为 2px；双行标签分别居中。示范亮键接入上游已有的 playback NoteOn/NoteOff 状态，未伪造 MIDI 输入或练习成绩。触键动画复用原有 ImpactFlash 和粒子数组，由真实输入或示范起音触发；接触期间按帧累积生成彩色碎片，总量受限。音条复用渐变缓存增加纵向层次，未来音符不提前发光。
+
 上游 SyncEngine/AccuracyTracker 与在线音源、全局 Tone Transport 耦合，其等待逻辑按单个 noteIndex 放行，和弦及 150ms 判定不适合直接替换已验证模块。Trainer 上新增可视反馈及起始拍点，原有起音评分标准保持；MIDI 接入不变。Sightread 也作了源码比较（GPL-3.0），未复制其代码或曲目。

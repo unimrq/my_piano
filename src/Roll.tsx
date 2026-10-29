@@ -3,6 +3,7 @@ import "pixi.js/unsafe-eval"; // CSP-safe precompiled sync functions, no eval pe
 import {
   beatToSeconds,
   practiceNotes,
+  playbackNotes,
   type Song,
   type Settings,
 } from "./model";
@@ -32,12 +33,16 @@ export default function Roll({
     latest = useRef({ song, settings, trainer }),
     last = useRef(-Infinity),
     spawned = useRef(new Set<string>()),
-    held = useRef(new Set<number>());
+    held = useRef(new Set<number>()),
+    demonstrated = useRef(new Map<number, NoteEvent>());
   const [error, setError] = useState("");
   latest.current = { song, settings, trainer };
   const notes = useMemo<NoteEvent[]>(
     () =>
-      practiceNotes(song, settings).map((n) => ({
+      (settings.mode === "listen"
+        ? playbackNotes(song, settings)
+        : practiceNotes(song, settings)
+      ).map((n) => ({
         id: n.id,
         midi: n.midi,
         pitch: midiToPitch(n.midi),
@@ -50,7 +55,7 @@ export default function Roll({
         velocity: n.velocity,
         channel: 0,
       })),
-    [song, settings],
+    [song, settings.mode, settings.hand, settings.split, settings.backing],
   );
   const notesRef = useRef(notes);
   notesRef.current = notes;
@@ -59,6 +64,12 @@ export default function Roll({
     const holder = host.current;
     let disposed = false,
       frame = 0;
+    let previousTrainer = latest.current.trainer;
+    let wasRunning = false;
+    let restoreKeys = false;
+    let previousFrame = performance.now();
+    const motion = !window.matchMedia("(prefers-reduced-motion: reduce)")
+      .matches;
     const width = surface.current!.clientWidth;
     const keyHeight = () =>
       Math.round(
@@ -138,7 +149,23 @@ export default function Roll({
         const animate = () => {
           if (disposed) return;
           const { song, trainer } = latest.current;
+          const now = performance.now();
+          const deltaFrames = Math.min(3, ((now - previousFrame) / 1000) * 60);
+          previousFrame = now;
+          if (trainer !== previousTrainer) {
+            falling.reset();
+            keys.reset();
+            spawned.current.clear();
+            held.current.clear();
+            demonstrated.current.clear();
+            restoreKeys = false;
+            last.current = -Infinity;
+            previousTrainer = trainer;
+          }
+          if (wasRunning && !trainer.running) falling.clearEffects();
+          wasRunning = trainer.running;
           const time = beatToSeconds(trainer.beat, song.tempos);
+          const startTime = beatToSeconds(trainer.start, song.tempos);
           const mode = latest.current.settings.registerMode ?? "follow";
           const minimum = latest.current.settings.minWhiteKeys ?? 21;
           const upcoming = notesRef.current
@@ -149,7 +176,9 @@ export default function Roll({
             [
               ...upcoming,
               ...trainer.held.keys(),
-              ...trainer.target.map((n) => n.midi),
+              ...(trainer.settings.mode === "wait"
+                ? trainer.target.map((n) => n.midi)
+                : []),
             ],
             minimum,
             mode,
@@ -170,7 +199,6 @@ export default function Roll({
               redraw = true;
             }
           }
-          if (redraw) falling.tick(time);
           const guide =
             trainer.settings.mode === "listen"
               ? []
@@ -183,31 +211,69 @@ export default function Roll({
                       beatToSeconds(n.beat, song.tempos) - time <= 0.6,
                   );
           keys.setTargets(guide);
+          const sounding = new Map(
+            trainer.settings.mode === "listen" && trainer.running
+              ? notesRef.current
+                  .filter(
+                    (n) =>
+                      n.startSeconds >= startTime &&
+                      n.startSeconds <= time &&
+                      n.endSeconds > time,
+                  )
+                  .map((n) => [n.midi, n] as const)
+              : [],
+          );
+          for (const [midi, note] of demonstrated.current)
+            if (!sounding.has(midi)) keys.noteOff(note, "playback");
+          for (const [midi, note] of sounding) {
+            const onset = demonstrated.current.get(midi)?.id !== note.id;
+            if (onset || restoreKeys) {
+              keys.noteOn(note, "playback", onset);
+              if (onset && motion) falling.strike(note);
+            }
+          }
+          demonstrated.current = sounding;
           keyCanvas.current?.setAttribute(
             "aria-description",
             guide.length
               ? `待弹：${guide.map((n) => midiToPitch(n.midi)).join("、")}`
-              : "当前没有待弹音",
+              : sounding.size
+                ? `示范：${[...sounding.keys()].map((midi) => midiToPitch(midi)).join("、")}`
+                : "当前没有待弹音",
           );
           falling.showGhost(null);
           for (const m of held.current)
             if (!trainer.held.has(m)) keys.inputNoteOff(m);
           for (const m of trainer.held.keys()) {
-            if (held.current.has(m)) continue;
+            const onset = !held.current.has(m);
+            if (motion && trainer.running && !sounding.has(m))
+              falling.contact(
+                {
+                  midi: m,
+                  hand: m < latest.current.settings.split ? "left" : "right",
+                },
+                deltaFrames,
+              );
+            if (!onset && !restoreKeys) continue;
             const hand = notesRef.current.findLast(
               (n) => n.midi === m && n.startSeconds <= time + 0.01,
             )?.hand;
-            keys.inputNoteOn(
-              m,
-              trainer.wrongKey === m,
+            const side =
               hand === "left" || hand === "right"
                 ? hand
                 : m < latest.current.settings.split
                   ? "left"
-                  : "right",
-            );
+                  : "right";
+            keys.inputNoteOn(m, trainer.wrongKey === m, side, onset);
+            if (onset && motion) falling.strike({ midi: m, hand: side });
           }
+          if (motion && trainer.running)
+            for (const note of sounding.values())
+              falling.contact(note, deltaFrames);
+          if (redraw) falling.tick(time);
+          else falling.advanceEffects(deltaFrames);
           held.current = new Set(trainer.held.keys());
+          restoreKeys = false;
           frame = requestAnimationFrame(animate);
         };
         animate();
@@ -225,7 +291,7 @@ export default function Roll({
         keyCanvas.current!.style.height = `${keyHeight()}px`;
         keyCanvas.current!.style.flexBasis = `${keyHeight()}px`;
         spawned.current.clear();
-        held.current.clear();
+        restoreKeys = true;
         last.current = -Infinity;
       }
     });
@@ -242,6 +308,7 @@ export default function Roll({
       }
       spawned.current.clear();
       held.current.clear();
+      demonstrated.current.clear();
     };
   }, []);
   useEffect(() => {
@@ -249,6 +316,7 @@ export default function Roll({
     keyboard.current?.reset();
     spawned.current.clear();
     held.current.clear();
+    demonstrated.current.clear();
     last.current = -Infinity;
     viewport.current.reset();
     roll.current?.setOptions({

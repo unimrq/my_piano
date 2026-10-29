@@ -17,6 +17,7 @@ const mime = {
   ".mxl": "application/vnd.recordare.musicxml",
   ".mid": "audio/midi",
   ".midi": "audio/midi",
+  ".mp3": "audio/mpeg",
   ".txt": "text/plain; charset=utf-8",
   ".md": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",

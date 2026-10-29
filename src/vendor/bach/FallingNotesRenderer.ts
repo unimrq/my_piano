@@ -9,12 +9,14 @@ import type {
   ImpactStyle,
 } from "./options";
 import type { SustainRange } from "./MusicData";
-import { lighten, hexToNum } from "./colorUtils";
+import { hexToNum } from "./colorUtils";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 const MIDI_MIN = 21;
 const MIDI_MAX = 108;
 const POOL_SIZE = 1200;
+const MAX_PARTICLES = 480;
+const CONTACT_COLORS = [0x78edc4, 0x86c8ff, 0xc2a0ff, 0xffcf78, 0xff8cb5];
 
 function isWhite(midi: number) {
   return !isBlackKey(midi);
@@ -91,14 +93,14 @@ function paletteFromCustom(c: CustomColors): ThemePalette {
     left: l,
     right: r,
     unknown: u,
-    leftBlack: lighten(l, 1.55),
-    rightBlack: lighten(r, 1.55),
-    unknownBlack: lighten(u, 1.55),
+    leftBlack: mixColor(l, 0xffffff, 0.12),
+    rightBlack: mixColor(r, 0xffffff, 0.12),
+    unknownBlack: mixColor(u, 0xffffff, 0.12),
   };
 }
 
 function noteColor(
-  note: NoteEvent,
+  note: Pick<NoteEvent, "midi" | "hand">,
   showHandColors: boolean,
   theme: ColorTheme,
   customColors?: CustomColors,
@@ -142,17 +144,17 @@ function makeGradient(base: number): PIXI.FillGradient {
     end: { x: 0, y: 1 },
     textureSpace: "local",
     colorStops: [
-      { offset: 0, color: mixColor(base, 0xffffff, 0.55) }, // bright top - always colored, never pure white
-      { offset: 0.22, color: mixColor(base, 0xffffff, 0.22) }, // slightly bright
-      { offset: 0.62, color: base }, // solid base
-      { offset: 1, color: mixColor(base, 0x000000, 0.3) }, // deeper bottom
+      { offset: 0, color: mixColor(base, 0xffffff, 0.46) },
+      { offset: 0.22, color: mixColor(base, 0xffffff, 0.16) },
+      { offset: 0.5, color: base },
+      { offset: 0.72, color: base },
+      { offset: 1, color: mixColor(base, 0x000000, 0.24) },
     ],
   });
 }
 
 // ── ImpactFlash ───────────────────────────────────────────────────────────────
-// Soft bloom effect: two expanding filled halos + a brief central sparkle.
-// No hard strokes, no particles - purely diffuse light that dissolves gently.
+// A short contact flare follows the key edge, then fades.
 class ImpactFlash {
   container: PIXI.Container;
   private outerBloom: PIXI.Graphics; // large, very soft, low-opacity halo
@@ -186,7 +188,7 @@ class ImpactFlash {
 
   /** dtFrames: PIXI ticker.deltaTime (1.0 = one 60fps frame). Frame-rate independent. */
   advance(dtFrames: number): boolean {
-    this.t += dtFrames * 0.033; // ~500ms total at 60fps
+    this.t += dtFrames * 0.06; // A single, short impact wave, about 280 ms.
     if (this.t >= 1) {
       this.reset();
       return true;
@@ -201,18 +203,18 @@ class ImpactFlash {
     const et = 1 - (1 - t) * (1 - t) * (1 - t);
 
     // ── Inner bloom - note-colored soft glow ─────────────────────────────────
-    const r1 = noteW * 0.4 + et * noteW * 1.5;
+    const r1 = noteW * (0.35 + et * 0.35);
     this.innerBloom.clear();
-    this.innerBloom.circle(0, 0, r1);
-    this.innerBloom.fill({ color: baseColor, alpha: (1 - t) * 0.28 });
+    this.innerBloom.roundRect(-r1, -1.5, r1 * 2, 3, 1);
+    this.innerBloom.fill({ color: baseColor, alpha: (1 - t) * 0.48 });
 
     // ── Outer bloom - large diffuse halo, 80ms delayed start ─────────────────
     const t2 = Math.max(0, t - 0.1);
     const et2 = 1 - (1 - t2) * (1 - t2) * (1 - t2);
-    const r2 = noteW * 0.4 + et2 * noteW * 3.0;
+    const r2 = noteW * (0.45 + et2 * 0.45);
     this.outerBloom.clear();
-    this.outerBloom.circle(0, 0, r2);
-    this.outerBloom.fill({ color: baseColor, alpha: (1 - t2) * 0.1 });
+    this.outerBloom.roundRect(-r2, -3, r2 * 2, 6, 1.5);
+    this.outerBloom.fill({ color: baseColor, alpha: (1 - t2) * 0.14 });
 
     // ── Sparkle - bright note-colored flash that exists only for the first ~100ms ──
     // Using baseColor (the note's own color) instead of white so it's visible in
@@ -220,10 +222,10 @@ class ImpactFlash {
     const sa = Math.max(0, 1 - t * 5.0);
     this.sparkle.clear();
     if (sa > 0) {
-      const sr = noteW * 0.35 * (1 - et);
+      const sr = noteW * 0.24 * (1 - et);
       if (sr > 0.5) {
-        this.sparkle.circle(0, 0, sr);
-        this.sparkle.fill({ color: baseColor, alpha: sa * 0.8 });
+        this.sparkle.roundRect(-sr, -1, sr * 2, 2, 1);
+        this.sparkle.fill({ color: baseColor, alpha: sa * 0.9 });
       }
     }
   }
@@ -276,7 +278,7 @@ class NoteBar {
     barWidth: number,
     startY: number,
     barHeight: number,
-    _gradient: PIXI.FillGradient,
+    gradient: PIXI.FillGradient,
     baseColor: number,
     labelText: string,
     cornerRadius: number,
@@ -298,7 +300,7 @@ class NoteBar {
     // Trim only the release edge: adjacent notes separate without shifting onset.
     const gap = Math.min(4, barHeight * 0.25);
     this.bg.roundRect(0, gap, barWidth, barHeight - gap, r);
-    this.bg.fill({ color: baseColor, alpha: 0.92 });
+    this.bg.fill({ fill: gradient, alpha: 0.96 });
     this.bg.stroke({
       width: showOutline ? 1.5 : 1,
       color: showOutline ? baseColor : 0xffffff,
@@ -429,7 +431,10 @@ export class FallingNotesRenderer {
     decay: number;
     gravity: number;
     color: number;
+    angle?: number;
+    spin?: number;
   }> = [];
+  private contactCarry = new Map<number, number>();
   private gridLayer!: PIXI.Graphics;
   private beatLayer!: PIXI.Graphics;
   private sustainLineLayer!: PIXI.Graphics; // thin connecting line
@@ -616,20 +621,20 @@ export class FallingNotesRenderer {
     }
   }
 
-  /** Burst of dots shooting sideways from the note's left & right edges at impact. */
+  /** A few small specks rise from an actual key strike, then dissolve. */
   private spawnBurst(cx: number, cy: number, noteW: number, color: number) {
-    const count = 9 + Math.floor(Math.random() * 6);
+    const count = 6;
     for (let i = 0; i < count; i++) {
-      const side = Math.random() < 0.5 ? -1 : 1;
+      if (this.particles.length >= MAX_PARTICLES) break;
       this.particles.push({
-        x: cx + side * (noteW * 0.5 + 1 + Math.random() * 3),
+        x: cx + ((i + 0.5) / count - 0.5) * noteW * 0.65,
         y: cy,
-        vx: side * (1.8 + Math.random() * 3.8),
-        vy: -(0.5 + Math.random() * 2.8),
-        size: 1.4 + Math.random() * 2.4,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: -(0.9 + Math.random() * 0.25),
+        size: 1.7 + Math.random() * 0.8,
         life: 1.0,
-        decay: 0.024 + Math.random() * 0.018,
-        gravity: 0.07,
+        decay: 0.027 + Math.random() * 0.004,
+        gravity: -0.002,
         color,
       });
     }
@@ -637,7 +642,7 @@ export class FallingNotesRenderer {
 
   /** Single sparkle drifting off the side of a falling bar (called each tick). */
   private spawnTrail(cx: number, cy: number, noteW: number, color: number) {
-    if (Math.random() > 0.38) return;
+    if (this.particles.length >= MAX_PARTICLES || Math.random() > 0.38) return;
     const side = Math.random() < 0.5 ? -1 : 1;
     this.particles.push({
       x: cx + side * (noteW * 0.5),
@@ -669,6 +674,58 @@ export class FallingNotesRenderer {
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
+
+  strike(note: Pick<NoteEvent, "midi" | "hand">) {
+    if (!this._initialized || note.midi < MIDI_MIN || note.midi > MIDI_MAX)
+      return;
+    const width = isWhite(note.midi) ? this.whiteW : this.blackW;
+    const cx = this.noteX(note.midi) + width * 0.5;
+    const color = noteColor(
+      note,
+      this.opts.showHandColors,
+      this.opts.colorTheme,
+      this.opts.customColors,
+    );
+    this.triggerFlash(cx, this.opts.height - 5, width, color);
+    this.spawnBurst(cx, this.opts.height - 5, width, color);
+  }
+
+  /** Keep emitting small fragments while a real note is held at the hit line. */
+  contact(note: Pick<NoteEvent, "midi" | "hand">, dtFrames: number) {
+    if (!this._initialized || note.midi < MIDI_MIN || note.midi > MIDI_MAX)
+      return;
+    const credit =
+      (this.contactCarry.get(note.midi) ?? 0) +
+      Math.min(3, Math.max(0, dtFrames)) * 1.15;
+    const count = Math.floor(credit);
+    this.contactCarry.set(note.midi, credit - count);
+    const width = isWhite(note.midi) ? this.whiteW : this.blackW;
+    const cx = this.noteX(note.midi) + width * 0.5;
+    const baseColor = noteColor(
+      note,
+      this.opts.showHandColors,
+      this.opts.colorTheme,
+      this.opts.customColors,
+    );
+    for (let i = 0; i < count && this.particles.length < MAX_PARTICLES; i++) {
+      this.particles.push({
+        x: cx + (Math.random() - 0.5) * width * 0.75,
+        y: this.opts.height - 5,
+        vx: (Math.random() - 0.5) * 3,
+        vy: -(2 + Math.random() * 0.6),
+        size: 1.6 + Math.random() * 1.2,
+        life: 1,
+        decay: 0.022 + Math.random() * 0.01,
+        gravity: 0.06,
+        color:
+          Math.random() < 0.25
+            ? baseColor
+            : CONTACT_COLORS[Math.floor(Math.random() * CONTACT_COLORS.length)],
+        angle: Math.random() < 0.75 ? Math.random() * Math.PI * 2 : undefined,
+        spin: (Math.random() - 0.5) * 0.18,
+      });
+    }
+  }
 
   addNote(note: NoteEvent, currentSeconds: number) {
     if (!this._initialized) return;
@@ -825,29 +882,7 @@ export class FallingNotesRenderer {
       }
     }
 
-    // Advance all active flashes - pass PIXI's normalized delta so animation
-    // duration is frame-rate independent (1.0 = one 60fps frame).
-    const dt = this.app.ticker.deltaTime;
-    for (const f of this.flashes) {
-      if (f.active) f.advance(dt);
-    }
-
-    // ── Particles ──────────────────────────────────────────────────────────
-    this.particleLayer.clear();
-    if (this.particles.length > 0) {
-      this.particles = this.particles.filter((p) => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += p.gravity;
-        p.life -= p.decay;
-        return p.life > 0;
-      });
-      for (const p of this.particles) {
-        const r = Math.max(0.5, p.size * p.life);
-        this.particleLayer.circle(p.x, p.y, r);
-        this.particleLayer.fill({ color: p.color, alpha: p.life * 0.88 });
-      }
-    }
+    this.advanceEffects();
 
     // Update measure number labels
     if (this.opts.showMeasureNums && this.opts.measureStarts?.length) {
@@ -988,11 +1023,62 @@ export class FallingNotesRenderer {
       this.pool.push(bar);
     }
     this.active.clear();
-    this.particles = [];
-    this.particleLayer?.clear();
+    this.clearEffects();
     this.sustainedNotes.clear();
     this.sustainedNoteLayer?.clear();
     this.ghostBar.visible = false;
+  }
+
+  /** Advance contact animation without moving notes in waiting practice. */
+  advanceEffects(dtFrames = this.app.ticker.deltaTime): boolean {
+    if (
+      !this._initialized ||
+      (!this.particles.length && !this.flashes.some((f) => f.active))
+    )
+      return false;
+    const dt = Math.min(3, Math.max(0, dtFrames));
+    for (const flash of this.flashes) if (flash.active) flash.advance(dt);
+    this.particleLayer.clear();
+    this.particles = this.particles.filter((p) => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += p.gravity * dt;
+      p.life -= p.decay * dt;
+      if (p.angle !== undefined) p.angle += p.spin! * dt;
+      return p.life > 0;
+    });
+    for (const p of this.particles) {
+      const size = Math.max(0.5, p.size * (0.5 + p.life * 0.5));
+      if (p.angle === undefined) this.particleLayer.circle(p.x, p.y, size);
+      else {
+        const dx = Math.cos(p.angle) * size,
+          dy = Math.sin(p.angle) * size,
+          acrossX = -dy * 0.55,
+          acrossY = dx * 0.55;
+        this.particleLayer.poly([
+          p.x - dx - acrossX,
+          p.y - dy - acrossY,
+          p.x + dx - acrossX,
+          p.y + dy - acrossY,
+          p.x + dx + acrossX,
+          p.y + dy + acrossY,
+          p.x - dx + acrossX,
+          p.y - dy + acrossY,
+        ]);
+      }
+      this.particleLayer.fill({
+        color: p.color,
+        alpha: Math.min(0.95, p.life * 1.3),
+      });
+    }
+    return this.particles.length > 0 || this.flashes.some((f) => f.active);
+  }
+
+  clearEffects() {
+    this.particles = [];
+    this.contactCarry.clear();
+    this.particleLayer?.clear();
+    for (const flash of this.flashes) flash.reset();
   }
 
   /**
@@ -1051,8 +1137,7 @@ export class FallingNotesRenderer {
     }
     if ("showGrid" in opts) this.gridLayer.visible = !!opts.showGrid;
     if ("impactStyle" in opts) {
-      this.particles = [];
-      this.particleLayer?.clear();
+      this.clearEffects();
     }
     if ("darkMode" in opts) this.drawHitLine();
     if ("showBeatLines" in opts && !opts.showBeatLines) this.beatLayer.clear();

@@ -55,10 +55,10 @@ async function keyPosition(page, midi) {
       await page.keyboard.press("Space");
       await page.getByRole("button", { name: "暂停", exact: true }).waitFor();
       await page.keyboard.press("Space");
-      await page.getByRole("button", { name: "播放", exact: true }).waitFor();
-      await page.getByRole("button", { name: "播放", exact: true }).click();
+      await page.getByRole("button", { name: "开始", exact: true }).waitFor();
+      await page.getByRole("button", { name: "开始", exact: true }).click();
       await page.keyboard.press("Space");
-      await page.getByRole("button", { name: "播放", exact: true }).waitFor();
+      await page.getByRole("button", { name: "开始", exact: true }).waitFor();
 
       await page.getByTitle("更多设置", { exact: true }).click();
       await page.getByRole("tab", { name: "显示", exact: true }).click();
@@ -69,7 +69,7 @@ async function keyPosition(page, midi) {
         0,
       );
       await page.locator(".panel-heading button").click();
-      await page.getByRole("button", { name: "播放", exact: true }).click();
+      await page.getByRole("button", { name: "开始", exact: true }).click();
       await page.waitForTimeout(800);
       const firstLine = await page
         .locator(".score-playhead")
@@ -106,7 +106,7 @@ async function keyPosition(page, midi) {
         marks,
         "拖动不能误弹",
       );
-      await page.keyboard.press("Space");
+      await page.getByRole("button", { name: "暂停", exact: true }).click();
 
       await page.locator('.sheet-host [data-measure="5"]').first().click();
       await page.getByRole("button", { name: "重来", exact: true }).click();
@@ -123,10 +123,7 @@ async function keyPosition(page, midi) {
         0,
       );
 
-      await page.getByTitle("更多设置", { exact: true }).click();
-      await page.getByRole("tab", { name: "练习", exact: true }).click();
       await page.getByLabel("练习模式", { exact: true }).selectOption("free");
-      await page.locator(".panel-heading button").click();
       const plot = page.getByLabel("上升音符", { exact: true });
       await plot.waitFor();
       await page.waitForTimeout(800);
@@ -144,8 +141,8 @@ async function keyPosition(page, midi) {
           document.querySelector('[aria-label="上升音符"]').dataset.active ===
           "0",
       );
-      await page.keyboard.press("Space");
-      await page.getByRole("button", { name: "播放", exact: true }).waitFor();
+      await page.getByRole("button", { name: "暂停", exact: true }).click();
+      await page.getByRole("button", { name: "继续", exact: true }).waitFor();
       await page.waitForTimeout(120);
       const frozen = await plot.evaluate((c) => c.toDataURL());
       await page.waitForTimeout(250);
@@ -154,7 +151,7 @@ async function keyPosition(page, midi) {
         frozen,
         "暂停后上升音符应停止",
       );
-      await page.keyboard.press("Space");
+      await page.getByRole("button", { name: "继续", exact: true }).click();
       await page.waitForTimeout(250);
       assert.notEqual(await plot.evaluate((c) => c.toDataURL()), frozen);
       const notes = await plot.getAttribute("data-notes");

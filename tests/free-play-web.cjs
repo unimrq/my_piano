@@ -57,10 +57,7 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
       await page.locator(".music-card").first().click();
       await page.locator(".sheet-host svg").first().waitFor();
       const title = await page.locator(".song-name").textContent();
-      await page.getByTitle("更多设置", { exact: true }).click();
-      await page.getByRole("tab", { name: "练习", exact: true }).click();
       await page.getByLabel("练习模式", { exact: true }).selectOption("free");
-      await page.locator(".panel-heading button").click();
       const plot = page.getByLabel("上升音符", { exact: true });
       await plot.waitFor();
       assert.equal(await page.locator(".sheet").count(), 1);
@@ -154,14 +151,11 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
       await plot.waitFor();
       assert.equal(await page.locator(".song-name").textContent(), title);
       assert.equal(await page.locator(".sheet").count(), 1);
-      await page.getByTitle("更多设置", { exact: true }).click();
-      await page.getByRole("tab", { name: "练习", exact: true }).click();
       assert.equal(
         await page.getByLabel("练习模式", { exact: true }).inputValue(),
         "free",
       );
       await page.getByLabel("练习模式", { exact: true }).selectOption("wait");
-      await page.locator(".panel-heading button").click();
       await page.getByLabel("下落音符", { exact: true }).waitFor();
       assert.equal(await plot.count(), 0);
       assert.equal(await page.locator(".song-name").textContent(), title);
@@ -192,10 +186,7 @@ const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
         initialKeys,
         { timeout: 8000 },
       );
-      await page.getByTitle("更多设置", { exact: true }).click();
-      await page.getByRole("tab", { name: "练习", exact: true }).click();
       await page.getByLabel("练习模式", { exact: true }).selectOption("free");
-      await page.locator(".panel-heading button").click();
       await plot.waitFor();
       assert.equal(await plot.getAttribute("data-notes"), "0");
       await page.getByRole("button", { name: "曲库", exact: true }).click();

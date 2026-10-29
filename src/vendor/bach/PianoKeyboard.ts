@@ -18,7 +18,7 @@ const WHITE_KEYS = Array.from(
 const WHITE_COUNT = WHITE_KEYS.length;
 
 // ── Color tokens ──────────────────────────────────────────────────────────────
-const C_LABEL = 0x8b919c;
+const C_LABEL = 0x343a46;
 const C_FINGER = 0xffffff;
 const C_PLAYBACK = 0x94a9db;
 const C_INPUT = 0x68d69a;
@@ -74,6 +74,14 @@ export class PianoKeyboard {
   private blackW = 0;
   private blackH = 0;
   private keyX = new Map<number, number>();
+  private pressFlashes = new Map<number, number>();
+  private readonly animatePress = () => {
+    const now = performance.now();
+    for (const [midi, started] of this.pressFlashes) {
+      if (now - started >= 180) this.pressFlashes.delete(midi);
+      this.redrawKey(midi);
+    }
+  };
 
   private pointers = new Map<number, KeyPointer>();
   private activatePointer(pointer: KeyPointer) {
@@ -173,6 +181,7 @@ export class PianoKeyboard {
     canvas.tabIndex = 0;
     this.computeLayout();
     this.drawKeys();
+    this.app.ticker.add(this.animatePress);
     this._initialized = true;
   }
 
@@ -234,6 +243,7 @@ export class PianoKeyboard {
             fill: white ? C_LABEL : 0xaaaaaa,
             fontFamily: "Space Grotesk, system-ui, sans-serif",
             fontWeight: "600",
+            align: "center",
           },
         });
         label.anchor.set(0.5, 1);
@@ -308,15 +318,72 @@ export class PianoKeyboard {
     _hand: "left" | "right" | null,
     hovered = false,
     target = false,
+    flash = 0,
   ) {
     g.clear();
-    const r = white ? 2 : 1;
-    g.roundRect(0.5, 0, w - 1, h - 1, r);
-    g.fill(white ? 0xfbfbfd : hovered ? 0x24242a : 0x141418);
-    if (white) g.stroke({ width: 1, color: 0xd8d8df });
-    if (active || target) {
-      g.roundRect(0.5, 0, w - 1, h - 1, r);
-      g.fill({ color: activeColor ?? C_INPUT, alpha: active ? 1 : 0.72 });
+    const lit = active || target;
+    if (white) {
+      // A narrow front lip and side edges give the key depth without tinting
+      // its playing surface. Hand colours remain a single, solid face.
+      g.roundRect(0.5, 0, w - 1, h - 1, 2).fill(0xc9cdd4);
+      g.roundRect(1, 0, w - 2, h - 6, 2).fill(hovered ? 0xffffff : 0xfbfbfd);
+      if (lit)
+        g.roundRect(1, 0, w - 2, h - 6, 2).fill({
+          color: activeColor ?? C_INPUT,
+          alpha: active ? 1 : 0.72,
+        });
+      if (flash > 0)
+        g.roundRect(1, 0, w - 2, h - 6, 2).fill({
+          color: 0xffffff,
+          alpha: flash * 0.22,
+        });
+      g.rect(1, h - 7, w - 2, 5).fill(
+        lit ? (activeColor ?? C_INPUT) : 0xe7e9ed,
+      );
+      g.rect(1, h - 7, w - 2, 5).fill({ color: 0x202633, alpha: 0.07 });
+      g.rect(1, 0, 1, h - 7).fill({ color: 0xffffff, alpha: 0.65 });
+      g.rect(w - 2, 0, 1, h - 7).fill({ color: 0x263044, alpha: 0.1 });
+      g.rect(1, 0, w - 2, 3).fill({ color: 0x11131a, alpha: 0.1 });
+      g.rect(2, h - 8, w - 4, 1).fill({ color: 0xffffff, alpha: 0.65 });
+    } else {
+      // Shadows stay in the black-key layer, above the white keys. The inset
+      // top and front bevel read as a raised key even at a narrow zoom level.
+      g.roundRect(-1.5, 3, w + 3, h + 2, 3).fill({
+        color: 0x000000,
+        alpha: 0.15,
+      });
+      g.roundRect(-0.5, 2, w + 1, h + 1, 2).fill({
+        color: 0x000000,
+        alpha: 0.25,
+      });
+      const edge = Math.min(2, w * 0.15);
+      g.roundRect(0, 0, w, h - 1, 2).fill(0x080a0e);
+      g.roundRect(edge, 0, w - edge * 2, h - 9, 1).fill(
+        hovered ? 0x2c2f36 : 0x20232a,
+      );
+      if (lit)
+        g.roundRect(edge, 0, w - edge * 2, h - 9, 1).fill({
+          color: activeColor ?? C_INPUT,
+          alpha: active ? 1 : 0.72,
+        });
+      if (flash > 0)
+        g.roundRect(edge, 0, w - edge * 2, h - 9, 1).fill({
+          color: 0xffffff,
+          alpha: flash * 0.22,
+        });
+      g.rect(edge, h - 9, w - edge * 2, 7).fill(
+        lit ? (activeColor ?? C_INPUT) : 0x11141b,
+      );
+      g.rect(edge, h - 9, w - edge * 2, 7).fill({
+        color: 0x000000,
+        alpha: 0.2,
+      });
+      g.rect(edge, 1, 1, h - 10).fill({ color: 0xffffff, alpha: 0.18 });
+      g.rect(w - edge - 1, 1, 1, h - 10).fill({ color: 0x000000, alpha: 0.3 });
+      g.rect(edge + 1, h - 10, w - edge * 2 - 2, 1).fill({
+        color: 0xffffff,
+        alpha: 0.2,
+      });
     }
   }
 
@@ -332,7 +399,7 @@ export class PianoKeyboard {
     const active = state.playbackActive || state.inputActive;
 
     // 3D press: shift container down when active
-    const pressOffset = active ? (white ? 5 : 3) : 0;
+    const pressOffset = active ? 2 : 0;
     cont.y = pressOffset;
 
     let color: number | null = null;
@@ -373,6 +440,12 @@ export class PianoKeyboard {
       state.hand,
       !active && state.hovered,
       !!state.target,
+      active && this.pressFlashes.has(midi)
+        ? Math.max(
+            0,
+            1 - (performance.now() - this.pressFlashes.get(midi)!) / 180,
+          ) ** 2
+        : 0,
     );
 
     // Finger label
@@ -417,9 +490,11 @@ export class PianoKeyboard {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  noteOn(note: NoteEvent, source: "playback" | "input") {
+  noteOn(note: NoteEvent, source: "playback" | "input", animate = true) {
     const state = this.keyStates.get(note.midi);
     if (!state) return;
+    if (animate) this.pressFlashes.set(note.midi, performance.now());
+    else this.pressFlashes.delete(note.midi);
     if (source === "playback") {
       state.playbackActive = true;
       state.hand =
@@ -434,6 +509,7 @@ export class PianoKeyboard {
   noteOff(note: NoteEvent, source: "playback" | "input") {
     const state = this.keyStates.get(note.midi);
     if (!state) return;
+    this.pressFlashes.delete(note.midi);
     if (source === "playback") {
       state.playbackActive = false;
       if (!state.inputActive) {
@@ -446,9 +522,16 @@ export class PianoKeyboard {
     this.redrawKey(note.midi);
   }
 
-  inputNoteOn(midi: number, wrong = false, hand: "left" | "right" = "right") {
+  inputNoteOn(
+    midi: number,
+    wrong = false,
+    hand: "left" | "right" = "right",
+    animate = true,
+  ) {
     const state = this.keyStates.get(midi);
     if (!state) return;
+    if (!animate) this.pressFlashes.delete(midi);
+    else if (!state.inputActive) this.pressFlashes.set(midi, performance.now());
     state.inputActive = true;
     state.wrong = wrong;
     state.hand = hand;
@@ -458,11 +541,13 @@ export class PianoKeyboard {
   inputNoteOff(midi: number) {
     const state = this.keyStates.get(midi);
     if (!state) return;
+    this.pressFlashes.delete(midi);
     state.inputActive = false;
     this.redrawKey(midi);
   }
 
   reset() {
+    this.pressFlashes.clear();
     for (const [midi] of this.keys) {
       const state = this.keyStates.get(midi);
       if (state) {
@@ -528,6 +613,7 @@ export class PianoKeyboard {
     this.keyLabels.clear();
     this.fingerLabels.clear();
     this.keyStates.clear();
+    this.pressFlashes.clear();
     this.app.stage.removeChildren();
     this.computeLayout();
     this.drawKeys();
@@ -544,6 +630,7 @@ export class PianoKeyboard {
         this.opts.onKeyRelease?.(pointer.midi);
     }
     this.pointers.clear();
+    this.pressFlashes.clear();
     this.opts.onPan?.(0, false);
     if (this._initialized) {
       this.app.destroy(false, { children: true });

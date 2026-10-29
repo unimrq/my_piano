@@ -14,6 +14,7 @@ import {
 } from "./model";
 import { Trainer } from "./trainer";
 import { MidiDevices } from "./midi";
+import { PianoAudio } from "./pianoAudio";
 import { importScore } from "./importer";
 import { makeXml } from "./notation";
 import { applyFingering, generateFingering } from "./fingering";
@@ -58,6 +59,10 @@ const initial = (): Library => ({
 });
 export default function App() {
   const freeSession = useRef(new FreePlaySession());
+  const piano = useRef(new PianoAudio());
+  const outputRoute = useRef<"midi" | "browser">("midi");
+  const playRequest = useRef(0);
+  const [loadingAudio, setLoadingAudio] = useState(false);
   const [freePaused, setFreePaused] = useState(false);
   const freePausedRef = useRef(freePaused);
   freePausedRef.current = freePaused;
@@ -126,15 +131,16 @@ export default function App() {
     scheduled = useRef(new Map<string, { midi: number; end: number }>()),
     played = useRef(new Set<string>()),
     lastClick = useRef(-999),
-    audio = useRef<AudioContext | null>(null),
-    latest = useRef({ song, settings });
-  latest.current = { song, settings };
+    audio = useRef<AudioContext | null>(null);
   const resetOutput = () => {
     devices.current?.silence();
+    piano.current.stop();
     scheduled.current.clear();
     played.current.clear();
   };
   const pause = () => {
+    playRequest.current++;
+    setLoadingAudio(false);
     freeSession.current.release(performance.now() / 1000);
     if (settingsRef.current.mode === "free") setFreePaused(true);
     engine.current.pause();
@@ -153,9 +159,9 @@ export default function App() {
   };
   const displaySettings = (patch: Partial<Settings>) => {
     setSettings((s) => ({ ...s, ...patch }));
-    setLibrary((l) => ({
-      ...l,
-      settings: { ...l.settings, [songId]: { ...settings, ...patch } },
+    setLibrary((lib) => ({
+      ...lib,
+      settings: { ...lib.settings, [songId]: { ...settings, ...patch } },
     }));
   };
   useEffect(() => {
@@ -364,7 +370,7 @@ export default function App() {
       () => {
         pause();
         engine.current.pedal = 0;
-        setNotice("钢琴连接已断开，练习已暂停。重新连接后点击播放。");
+        setNotice("钢琴连接已断开，练习已暂停。重新连接后可继续。");
       },
     );
     devices.current = midi;
@@ -442,7 +448,16 @@ export default function App() {
   const finish = () => {
     const e = engine.current;
     resetOutput();
-    if (e.settings.mode === "listen" || e.settings.mode === "free") return;
+    if (e.settings.mode === "listen" || e.settings.mode === "free") {
+      if (e.settings.mode === "listen" && e.settings.loop) {
+        engine.current = new Trainer(e.song, e.settings);
+        activeMs.current = 0;
+        lastClick.current = -999;
+        engine.current.startRun(performance.now(), false);
+      }
+      refresh((v) => v + 1);
+      return;
+    }
     const r: Result = {
       id: newId(),
       songId: e.song.id,
@@ -476,7 +491,8 @@ export default function App() {
         if (lastFrame.current)
           activeMs.current += Math.min(100, now - lastFrame.current);
         e.update(now);
-        const { song: s, settings: c } = latest.current;
+        const s = e.song,
+          c = e.settings;
         const start = beatToSeconds(e.start, s.tempos),
           sec = beatToSeconds(e.beat, s.tempos);
         // Only notes on the chosen playback interval are emitted; accompaniment never echoes live input.
@@ -489,7 +505,8 @@ export default function App() {
                 (other) => other.midi === n.midi,
               )
             )
-              devices.current?.off(n.midi);
+              if (outputRoute.current === "browser") piano.current.off(n.midi);
+              else devices.current?.off(n.midi);
           }
         if (sec >= start)
           for (const n of audible) {
@@ -498,7 +515,9 @@ export default function App() {
             if (n.beat <= e.beat + 0.001) {
               played.current.add(n.id);
               if (n.beat + n.duration > e.beat) {
-                devices.current?.on(n.midi, n.velocity);
+                if (outputRoute.current === "browser")
+                  piano.current.on(n.midi, n.velocity);
+                else devices.current?.on(n.midi, n.velocity);
                 scheduled.current.set(n.id, {
                   midi: n.midi,
                   end:
@@ -552,8 +571,10 @@ export default function App() {
       window.AudioContext ??
       (window as Window & { webkitAudioContext?: typeof AudioContext })
         .webkitAudioContext;
-    if (!audio.current && Context) audio.current = new Context();
-    return audio.current?.resume();
+    if (!Context)
+      throw Error("当前浏览器不支持声音播放，请使用 Chrome、Edge 或 Safari。");
+    if (!audio.current) audio.current = new Context();
+    return audio.current.resume();
   }
   async function connectMidi() {
     setNotice("");
@@ -564,35 +585,55 @@ export default function App() {
     }
   }
   async function start() {
-    if (settings.mode === "free") {
+    const config = settings;
+    if (config.mode === "free") {
       if (freePaused) setFreePaused(false);
       else pause();
       return;
     }
     setError("");
-    const e = engine.current;
+    let e = engine.current;
     if (e.running) {
       pause();
       return;
     }
-    if (settings.mode !== "listen" && !e.notes.length) {
+    if (config.mode !== "listen" && !e.notes.length) {
       setError("当前声部和区间没有练习音符，请修改声部分配或区间。");
-      return;
-    }
-    if (settings.mode === "listen" && !devices.current?.output) {
-      setNotice("示范需要选择钢琴 MIDI 输出，声音由钢琴播放。");
-      setPanel("settings");
       return;
     }
     if (e.done) {
       restart();
+      e = engine.current;
     }
-    await enableAudio();
-    if (activeMs.current === 0) startedAt.current = performance.now();
-    lastFrame.current = performance.now();
-    engine.current.startRun(performance.now(), activeMs.current === 0);
-    setNotice("");
-    refresh((v) => v + 1);
+    const request = ++playRequest.current;
+    setLoadingAudio(true);
+    try {
+      const notes = playbackNotes(e.song, e.settings);
+      outputRoute.current = devices.current?.output ? "midi" : "browser";
+      if (outputRoute.current === "browser" && notes.length) {
+        await enableAudio();
+        await piano.current.prepare(
+          audio.current!,
+          notes.map((n) => n.midi),
+        );
+      } else if (config.metronome || config.mode === "rhythm")
+        await enableAudio();
+      if (engine.current !== e || request !== playRequest.current) return;
+      audibleRef.current = notes;
+      if (activeMs.current === 0) startedAt.current = performance.now();
+      lastFrame.current = performance.now();
+      e.startRun(
+        performance.now(),
+        activeMs.current === 0 && config.mode !== "listen",
+      );
+      setNotice("");
+      refresh((v) => v + 1);
+    } catch (error) {
+      if (request === playRequest.current)
+        setError("播放未能开始：" + String(error));
+    } finally {
+      if (request === playRequest.current) setLoadingAudio(false);
+    }
   }
   const restart = () =>
     configure({
@@ -602,7 +643,7 @@ export default function App() {
       loop: false,
     });
   playback.current = {
-    enabled: ready && !busy && !preparingScore && !panel,
+    enabled: ready && !busy && !loadingAudio && !preparingScore && !panel,
     toggle: () => void start(),
   };
   async function importFile(file: { name: string; bytes: number[] }) {
@@ -705,7 +746,7 @@ export default function App() {
   return (
     <div
       className={home ? "app web-app" : "app web-app practice-focus"}
-      aria-busy={busy}
+      aria-busy={busy || loadingAudio}
     >
       {home && (
         <LibraryHome
@@ -754,6 +795,19 @@ export default function App() {
           <Icon name="chevron" />
         </button>
         <div className="toolbar">
+          <select
+            className="practice-mode"
+            aria-label="练习模式"
+            value={settings.mode}
+            onChange={(event) =>
+              configure({ mode: event.target.value as Settings["mode"] })
+            }
+          >
+            <option value="wait">自由跟弹</option>
+            <option value="free">自由练习</option>
+            <option value="rhythm">节奏练习</option>
+            <option value="listen">示范播放</option>
+          </select>
           {freePlay ? (
             <button onClick={() => freeSession.current.clear()}>清空</button>
           ) : (
@@ -823,13 +877,19 @@ export default function App() {
           <button
             className="primary playback-toggle"
             onClick={() => void start()}
-            disabled={!ready || busy || preparingScore}
-            title="播放 / 暂停（空格）"
+            disabled={!ready || busy || loadingAudio || preparingScore}
+            title="开始 / 暂停（空格）"
           >
             <Icon
               name={(freePlay ? !freePaused : e.running) ? "pause" : "play"}
             />
-            {(freePlay ? !freePaused : e.running) ? "暂停" : "播放"}
+            {(freePlay ? !freePaused : e.running)
+              ? "暂停"
+              : freePlay
+                ? "继续"
+                : settings.mode === "listen"
+                  ? "播放"
+                  : "开始"}
           </button>
           <button
             className="icon-button"
@@ -902,15 +962,7 @@ export default function App() {
             max="48"
             value={settings.sheetHeight}
             onChange={(v) => {
-              const h = Number(v.target.value);
-              setSettings((s) => ({ ...s, sheetHeight: h }));
-              setLibrary((l) => ({
-                ...l,
-                settings: {
-                  ...l.settings,
-                  [songId]: { ...settings, sheetHeight: h },
-                },
-              }));
+              displaySettings({ sheetHeight: Number(v.target.value) });
             }}
           />
           {freePlay ? (
@@ -1033,24 +1085,10 @@ export default function App() {
                   >
                     <section className="settings-group">
                       <div className="settings-basics">
-                        <label className="field">
-                          模式
-                          <select
-                            aria-label="练习模式"
-                            value={settings.mode}
-                            onChange={(v) =>
-                              configure({
-                                mode: v.target.value as Settings["mode"],
-                              })
-                            }
-                          >
-                            <option value="wait">自由跟弹</option>
-                            <option value="free">自由练习</option>
-                            <option value="rhythm">节奏模式</option>
-                            <option value="listen">示范播放</option>
-                          </select>
-                        </label>
-                        <label className="field" hidden={freePlay}>
+                        <label
+                          className="field"
+                          hidden={freePlay || settings.mode === "listen"}
+                        >
                           声部
                           <select
                             aria-label="练习双手"
@@ -1197,7 +1235,7 @@ export default function App() {
                             configure({ outputId: v.target.value || "none" });
                           }}
                         >
-                          <option value="">不播放示范与伴奏</option>
+                          <option value="">电脑扬声器</option>
                           {outs.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}
@@ -1382,6 +1420,9 @@ export default function App() {
                 <p>
                   自由跟弹按自己的速度练习，弹对一组音即可继续，不用等待节拍。可以选双手，或先分手熟悉两三个小节。
                 </p>
+                <p>
+                  顶栏可切换自由跟弹、自由练习、节奏练习和示范播放。自由练习记录上升音符，节奏练习按拍判定，示范播放自动演奏曲子。空格控制当前模式的开始或暂停。
+                </p>
                 <h3>导入喜欢的曲子</h3>
                 <p>
                   优先获取有授权的 MusicXML / MXL，它们能保留五线谱。MIDI
@@ -1393,8 +1434,8 @@ export default function App() {
                 </p>
                 <h3>发声与连接</h3>
                 <p>
-                  软件不回放你弹的音，直接听钢琴；示范与伴奏通过 MIDI
-                  发给钢琴。节拍器由浏览器输出。钢琴移调设为
+                  软件不回放你弹的音，直接听钢琴；示范与伴奏优先通过所选 MIDI
+                  发给钢琴，没有选择输出设备时由浏览器播放。节拍器由浏览器输出。钢琴移调设为
                   0，关闭叠音/分键，避免重复输入。
                 </p>
                 <h3>数据与限制</h3>
@@ -1407,6 +1448,18 @@ export default function App() {
                   Bach to Basics（MIT）MIDI
                   解析逻辑的改写；React、OpenSheetMusicDisplay 等许可证见源码
                   NOTICE.md 和 LICENSES.third-party.txt。
+                </p>
+                <p>
+                  钢琴音色：Alexander Holm 的 Salamander Grand Piano（CC BY
+                  3.0），
+                  <a
+                    href="./licenses/Salamander-ATTRIBUTION.txt"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    来源与授权
+                  </a>
+                  。
                 </p>
               </div>
             )}

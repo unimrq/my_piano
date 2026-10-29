@@ -5,14 +5,14 @@ export const pianoWhites = Array.from({ length: 88 }, (_, i) => i + 21).filter(
 export class KeyboardRange {
   private layout = "";
   private movedAt = -Infinity;
-  private narrowSince: number | undefined;
+  private pending: { low: number; high: number; since: number } | undefined;
   private manualUntil = -Infinity;
 
   constructor(public range: [number, number] = [21, 42]) {}
 
   reset() {
     this.layout = "";
-    this.narrowSince = undefined;
+    this.pending = undefined;
     this.manualUntil = -Infinity;
   }
   pan(whiteKeys: number, now: number) {
@@ -20,7 +20,7 @@ export class KeyboardRange {
     const left = Math.max(0, Math.min(52 - count, this.range[0] + whiteKeys));
     this.range = [left, left + count];
     this.manualUntil = now + 8;
-    this.narrowSince = undefined;
+    this.pending = undefined;
     return this.range;
   }
 
@@ -46,7 +46,7 @@ export class KeyboardRange {
         this.range = [begin, begin + count];
         this.movedAt = now;
       }
-      if (count !== currentCount || changed) this.narrowSince = undefined;
+      this.pending = undefined;
       return this.range;
     };
     if (mode === "full") return move(0, 52);
@@ -55,10 +55,12 @@ export class KeyboardRange {
         ? move(center(left, right - 1, minimum), minimum)
         : this.range;
     if (!changed && now < this.manualUntil) return this.range;
-    if (!pitches.length)
+    if (!pitches.length) {
+      this.pending = undefined;
       return changed
         ? move(center(left, right - 1, minimum), minimum)
         : this.range;
+    }
 
     const lowest = Math.min(...pitches),
       highest = Math.max(...pitches);
@@ -68,17 +70,57 @@ export class KeyboardRange {
     );
     const highIndex = pianoWhites.findIndex((m) => m >= highest);
     const high = highIndex < 0 ? 51 : highIndex;
-    const count = Math.min(52, Math.max(minimum, high - low + 7));
-    if (changed || low < left || high >= right)
-      return move(center(low, high, count), count);
+    // Keep an octave of white keys between zoom levels. Small changes at the
+    // look-ahead boundary should not resize the keyboard and both canvases.
+    const countFor = (low: number, high: number, padding = 6) =>
+      Math.min(
+        52,
+        minimum +
+          Math.max(0, Math.ceil((high - low + 1 + padding - minimum) / 7)) * 7,
+      );
+    const count = countFor(low, high);
+    if (changed) return move(center(low, high, count), count);
+    if (count > currentCount || low < left || high >= right) {
+      // A distant single note can require panning, but must not bypass the
+      // settling time and immediately shrink a previously wider view.
+      const nextCount = Math.max(currentCount, count);
+      return move(center(low, high, nextCount), nextCount);
+    }
 
-    // Use elapsed real time: wait mode and seeking must not freeze zoom recovery.
-    if (count < currentCount) this.narrowSince ??= now;
-    else this.narrowSince = undefined;
-    if (this.narrowSince !== undefined && now - this.narrowSince >= 3)
-      return move(center(low, high, count), count);
-    if ((low < left + 2 || high >= right - 2) && now - this.movedAt >= 2.5)
-      return move(center(low, high, currentCount), currentCount);
+    const narrower = countFor(low, high, 9) < currentCount;
+    const offCenter =
+      Math.abs(center(low, high, currentCount) - left) >=
+      Math.max(3, Math.floor(currentCount * 0.14));
+    if (!narrower && !offCenter) {
+      this.pending = undefined;
+      return this.range;
+    }
+    this.pending ??= { low, high, since: now };
+    this.pending.low = Math.min(this.pending.low, low);
+    this.pending.high = Math.max(this.pending.high, high);
+    const pendingCount = countFor(this.pending.low, this.pending.high);
+    // Use the whole observed phrase, rather than the last frame, to avoid
+    // zooming in on one note immediately before the next chord returns.
+    // Extra padding gates a shrink; it must not become the new width, which
+    // would leave an unchanged phrase one zoom level wider after a stray note.
+    if (
+      narrower &&
+      countFor(this.pending.low, this.pending.high, 9) >= currentCount
+    ) {
+      this.pending = undefined;
+      return this.range;
+    }
+    const wait = narrower ? 3 : 1;
+    if (now - this.pending.since >= wait && now - this.movedAt >= 2.5) {
+      return move(
+        center(
+          this.pending.low,
+          this.pending.high,
+          narrower ? pendingCount : currentCount,
+        ),
+        narrower ? pendingCount : currentCount,
+      );
+    }
     return this.range;
   }
 }
