@@ -13,7 +13,6 @@ export default function LibraryHome({
   library,
   onChoose,
   onFavorite,
-  onImport,
   onDevice,
   onHistory,
   onHelp,
@@ -23,7 +22,6 @@ export default function LibraryHome({
   library: Library;
   onChoose: (s: Song) => void;
   onFavorite: (song: Song) => void;
-  onImport: () => void;
   onDevice: () => void;
   onHistory: () => void;
   onHelp: () => void;
@@ -131,13 +129,6 @@ export default function LibraryHome({
               </button>
             )}
           </label>
-          <button
-            className="import-button"
-            onClick={onImport}
-            disabled={!ready}
-          >
-            导入曲谱
-          </button>
         </div>
         <div className="library-scroll">
           <div className="library-title">
@@ -269,7 +260,7 @@ export default function LibraryHome({
               <p>
                 {section === "favorites"
                   ? "点击曲目右上角的爱心收藏。"
-                  : "调整搜索和筛选，或导入自己的曲谱。"}
+                  : "调整搜索和筛选。"}
               </p>
               <button
                 onClick={() => {

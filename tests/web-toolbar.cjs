@@ -2,6 +2,7 @@ const path = require("node:path"),
   fs = require("node:fs/promises"),
   assert = require("node:assert/strict");
 const { chromium, webkit } = require("playwright");
+const { openFixture } = require("./browser-fixture.cjs");
 const base = process.env.QINXI_WEB_URL || "http://localhost:4173",
   artifacts = path.resolve(__dirname, "../test-results");
 
@@ -267,14 +268,13 @@ async function run(engine, name) {
     await page.locator(".panel-heading button").tap();
     const longTitle =
       "用于检查完整曲名显示的双手练习曲（标题换行后仍应完整可见）";
-    await page.locator("#file-input").setInputFiles({
-      name: "完整曲名检查.musicxml",
-      mimeType: "application/xml",
-      buffer: Buffer.from(
+    await openFixture(
+      page,
+      "完整曲名检查.musicxml",
+      Buffer.from(
         `<score-partwise version="4.0"><work><work-title>${longTitle}</work-title></work><part-list><score-part id="P"><part-name>Piano</part-name></score-part></part-list><part id="P"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration></note></measure></part></score-partwise>`,
       ),
-    });
-    await page.getByRole("button", { name: "加入曲库", exact: true }).tap();
+    );
     await page.locator(".sheet-host svg").first().waitFor();
     console.log(name, "score ready");
     await toolbarPositionIs(page, "top");

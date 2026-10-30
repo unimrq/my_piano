@@ -13,6 +13,7 @@ export default function Sheet({
   onSeek,
   loopTool,
   onLoop,
+  showFingering = true,
 }: {
   xml: string;
   beat: number;
@@ -20,6 +21,7 @@ export default function Sheet({
   onSeek: (beat: number) => void;
   loopTool: boolean;
   onLoop: (range: [number, number]) => void;
+  showFingering?: boolean;
 }) {
   const surface = useRef<HTMLDivElement>(null);
   const dragging = useRef<{
@@ -121,7 +123,7 @@ export default function Sheet({
       drawPartAbbreviations: false,
       drawMeasureNumbers: true,
       fingeringPosition: "below",
-      drawFingerings: true,
+      drawFingerings: showFingering,
       fingeringInsideStafflines: false,
       followCursor: false,
       drawingParameters: "compacttight",
@@ -187,7 +189,7 @@ export default function Sheet({
       if (!naturalHeight) {
         display.Zoom = 1;
         display.render();
-        alignFingerings();
+        if (showFingering) alignFingerings();
         const svg = host.current!.querySelector("svg")!;
         naturalWidth = svg.width.baseVal.value;
         naturalHeight = svg.height.baseVal.value;
@@ -298,7 +300,11 @@ export default function Sheet({
       xml,
       "application/xml",
     );
-    compactChordFingerings(displayDocument, trainer.settings.split);
+    if (showFingering)
+      compactChordFingerings(displayDocument, trainer.settings.split);
+    else
+      for (const fingering of displayDocument.querySelectorAll("fingering"))
+        fingering.remove();
     for (const direction of displayDocument.querySelectorAll("direction")) {
       if (direction.querySelector("metronome, sound[tempo]"))
         for (const label of direction.querySelectorAll(
@@ -336,7 +342,7 @@ export default function Sheet({
       graphical.current = [];
       api.current = null;
     };
-  }, [xml]);
+  }, [xml, showFingering]);
   useEffect(() => {
     position.current = -1;
     manualUntil.current = 0;

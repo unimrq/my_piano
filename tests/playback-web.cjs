@@ -2,6 +2,7 @@ const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { openFixture } = require("./browser-fixture.cjs");
 
 const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
 const artifacts = path.resolve(__dirname, "../test-results");
@@ -236,17 +237,7 @@ async function readyScore(page) {
 async function importFixture(page) {
   await page.goto(base);
   await page.locator(".music-card").first().waitFor();
-  const [chooser] = await Promise.all([
-    page.waitForEvent("filechooser"),
-    page.getByRole("button", { name: "导入曲谱", exact: true }).click(),
-  ]);
-  await chooser.setFiles({
-    name: `${title}.musicxml`,
-    mimeType: "application/xml",
-    buffer: Buffer.from(score),
-  });
-  await page.getByLabel("自动生成缺失指法", { exact: true }).uncheck();
-  await page.getByRole("button", { name: "加入曲库", exact: true }).click();
+  await openFixture(page, `${title}.musicxml`, Buffer.from(score));
   await readyScore(page);
 }
 async function settings(page, tab = "练习") {
@@ -493,7 +484,8 @@ async function mainScenario(page, context) {
   await settings(page);
   await page.getByLabel("起始小节", { exact: true }).fill("1");
   await page.getByLabel("结束小节", { exact: true }).fill("4");
-  await page.getByLabel("循环练习", { exact: true }).uncheck();
+  // Keep the short fixture playing while screenshots and pixel checks run.
+  await page.getByLabel("循环练习", { exact: true }).check();
   await closeSettings(page);
   assert.equal(
     await page.getByLabel("速度", { exact: true }).inputValue(),
@@ -502,6 +494,8 @@ async function mainScenario(page, context) {
   await page.evaluate(() => playbackProbe.resetSignal());
   await page.getByRole("button", { name: "播放", exact: true }).click();
   const audio = await assertAudible(page);
+  const moving = await playhead(page);
+  await assertAdvances(page, moving);
   await page.waitForTimeout(1200);
   const sustainedContact = await keyboardPixels(
     page,
@@ -524,8 +518,6 @@ async function mainScenario(page, context) {
   );
   const litKeys = await keyboardPixels(page, "playback-keys-active");
   assertLitKeyboard(litKeys);
-  const moving = await playhead(page);
-  await assertAdvances(page, moving);
   await page.screenshot({
     path: path.join(artifacts, "playback-browser-audio.png"),
   });

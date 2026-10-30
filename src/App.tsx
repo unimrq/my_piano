@@ -16,7 +16,6 @@ import {
 import { Trainer } from "./trainer";
 import { MidiDevices } from "./midi";
 import { PianoAudio } from "./pianoAudio";
-import { importScore } from "./importer";
 import { makeXml } from "./notation";
 import { applyFingering, generateFingering } from "./fingering";
 import type { HandSize } from "./vendor/pianoplayer";
@@ -100,7 +99,6 @@ export default function App() {
   freePausedRef.current = freePaused;
   const playback = useRef({ enabled: false, toggle: () => {} });
   const [handSize, setHandSize] = useState<HandSize>("M");
-  const [autoFingers, setAutoFingers] = useState(true);
   const [fingerStatus, setFingerStatus] = useState("");
   const fingerAttempts = useRef(new Set<string>());
   const [home, setHome] = useState(true);
@@ -122,15 +120,13 @@ export default function App() {
     [ready, setReady] = useState(false),
     [notice, setNotice] = useState(""),
     [, refresh] = useState(0),
-    [pending, setPending] = useState<{
-      song: Song;
-    } | null>(null),
     [result, setResult] = useState<Result | null>(null),
     [busy, setBusy] = useState(false);
   const freePlay = settings.mode === "free";
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const song = library.songs.find((s) => s.id === songId) ?? library.songs[0];
+  const showFingering = library.showFingering ?? true;
   const keyboardPitches = useMemo(() => {
     const ignored = new Set(
       song.tracks
@@ -146,6 +142,7 @@ export default function App() {
     !song.notes.some((n) => n.finger) &&
     !/<fingering[\s>]/.test(song.xml);
   const preparingScore =
+    showFingering &&
     !freePlay &&
     missingFingers &&
     (!fingerAttempts.current.has(song.id) || busy);
@@ -399,6 +396,7 @@ export default function App() {
           favorites: previous?.favorites ?? [],
           toolbarPosition:
             previous?.toolbarPosition === "bottom" ? "bottom" : "top",
+          showFingering: previous?.showFingering !== false,
         };
         setLibrary(data);
         setSongId(selected.id);
@@ -753,51 +751,6 @@ export default function App() {
     enabled: ready && !busy && !loadingAudio && !preparingScore && !panel,
     toggle: () => void start(),
   };
-  async function importFile(file: { name: string; bytes: number[] }) {
-    setBusy(true);
-    setError("");
-    pause();
-    try {
-      const s = importScore(file.name, new Uint8Array(file.bytes));
-      setPending({ song: s });
-    } catch (e) {
-      setError("导入失败：" + String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  function openImport() {
-    document.getElementById("file-input")?.click();
-  }
-  async function commit() {
-    if (!pending) return;
-    setBusy(true);
-    try {
-      let s = { ...pending.song };
-      s.notes = s.notes.map((n) => roleNote(n, s, settings.split));
-      if (s.source === "midi") s.xml = makeXml(s);
-      if (autoFingers) {
-        const generated = await generateFingering(s, settings.split, handSize);
-        s = generated.song;
-        if (generated.skipped)
-          setNotice(`${generated.skipped} 个音超出指法可分配范围，保留空白`);
-      }
-      const next = {
-        ...libRef.current,
-        songs: [...libRef.current.songs, s],
-        lastSong: s.id,
-      };
-      await save(next);
-      if (saveError.current) throw Error("曲库未能保存，请重试");
-      setLibrary(next);
-      setPending(null);
-      choose(s);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function addFingers() {
     pause();
     setBusy(true);
@@ -832,6 +785,7 @@ export default function App() {
     if (
       freePlay ||
       home ||
+      !showFingering ||
       !ready ||
       busy ||
       !missingFingers ||
@@ -840,7 +794,7 @@ export default function App() {
       return;
     fingerAttempts.current.add(song.id);
     void addFingers();
-  }, [freePlay, home, ready, busy, song]);
+  }, [freePlay, home, ready, busy, song, showFingering]);
   const e = engine.current,
     m = song.measures.findLast((m) => m.beat <= e.beat);
   const currentTempo =
@@ -871,7 +825,6 @@ export default function App() {
                 : [...(l.favorites ?? []), s.id],
             }))
           }
-          onImport={() => void openImport()}
           onDevice={() => {
             setSettingsTab("device");
             setPanel("settings");
@@ -1043,6 +996,7 @@ export default function App() {
             ) : (
               <Sheet
                 xml={song.xml}
+                showFingering={showFingering}
                 beat={Math.max(e.start, e.beat)}
                 trainer={e}
                 loopTool={freePlay ? false : loopTool}
@@ -1127,14 +1081,6 @@ export default function App() {
             </div>
             {panel === "library" && (
               <>
-                <button
-                  className="primary wide"
-                  disabled={busy}
-                  onClick={() => void openImport()}
-                >
-                  {busy ? "正在解析…" : "导入曲谱"}
-                </button>
-                <p className="muted">MIDI · MusicXML · MXL</p>
                 <div className="song-list">
                   {library.songs.map((s) => (
                     <div
@@ -1389,6 +1335,19 @@ export default function App() {
                     hidden={settingsTab !== "display"}
                   >
                     <section className="settings-group">
+                      <label className="field check">
+                        <input
+                          type="checkbox"
+                          checked={showFingering}
+                          onChange={(event) =>
+                            setLibrary((current) => ({
+                              ...current,
+                              showFingering: event.target.checked,
+                            }))
+                          }
+                        />
+                        显示指法
+                      </label>
                       <label className="field">
                         工具栏位置
                         <select
@@ -1622,15 +1581,8 @@ export default function App() {
                 <p>
                   顶栏可切换自由跟弹、自由练习、节奏练习和示范播放。自由练习记录上升音符，节奏练习按拍判定，示范播放自动演奏曲子。空格控制当前模式的开始或暂停。
                 </p>
-                <h3>导入喜欢的曲子</h3>
-                <p>
-                  优先获取有授权的 MusicXML / MXL，它们能保留五线谱。MIDI
-                  也能导入，但自动转谱只是练习参考。
-                </p>
-                <p>
-                  可以在 MuseScore Studio 中手工录谱或打开合法获得的谱，再导出
-                  MusicXML。公版原作的现代编配和排版可能仍有版权，请查看具体授权。
-                </p>
+                <h3>曲库</h3>
+                <p>曲谱由服务器统一添加，更新后刷新页面即可练习。</p>
                 <h3>发声与连接</h3>
                 <p>
                   软件不回放你弹的音，直接听钢琴；示范与伴奏优先通过所选 MIDI
@@ -1667,76 +1619,6 @@ export default function App() {
             )}
           </aside>
         </>
-      )}
-      {pending && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h2>分配练习声部</h2>
-            <p>
-              {pending.song.title} · {pending.song.notes.length} 音 ·{" "}
-              {pending.song.measures.length} 小节
-            </p>
-            {pending.song.tracks.map((t) => (
-              <label className="field track" key={t.id}>
-                <span>
-                  {t.name}
-                  <small>
-                    {t.count} 音 · {pitchName(t.low)}–{pitchName(t.high)}
-                  </small>
-                </span>
-                <select
-                  value={t.role}
-                  onChange={(v) =>
-                    setPending({
-                      ...pending,
-                      song: {
-                        ...pending.song,
-                        tracks: pending.song.tracks.map((x) =>
-                          x.id === t.id
-                            ? { ...x, role: v.target.value as Role }
-                            : x,
-                        ),
-                      },
-                    })
-                  }
-                >
-                  {roleOptions()}
-                </select>
-              </label>
-            ))}
-            <p className="hint">
-              {pending.song.warning ||
-                "确认左右手后加入曲库；之后仍可在设置中修改。"}
-            </p>
-            <label className="field check">
-              <input
-                type="checkbox"
-                checked={autoFingers}
-                disabled={busy}
-                onChange={(e) => setAutoFingers(e.target.checked)}
-              />
-              自动生成缺失指法
-            </label>
-            {error && <p className="hint">{error}</p>}
-            <div className="actions">
-              <button disabled={busy} onClick={() => setPending(null)}>
-                取消
-              </button>
-              <button
-                className="primary"
-                disabled={
-                  busy ||
-                  pending.song.tracks.every((t) =>
-                    ["ignore", "backing"].includes(t.role),
-                  )
-                }
-                onClick={() => void commit()}
-              >
-                {busy ? "保存中…" : "加入曲库"}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
       {result && (
         <div className="modal-backdrop">
@@ -1787,21 +1669,6 @@ export default function App() {
           </div>
         </div>
       )}
-      <input
-        id="file-input"
-        type="file"
-        hidden
-        accept=".mid,.midi,.xml,.musicxml,.mxl"
-        onChange={async (v) => {
-          const file = v.target.files?.[0];
-          if (file)
-            await importFile({
-              name: file.name,
-              bytes: Array.from(new Uint8Array(await file.arrayBuffer())),
-            });
-          v.target.value = "";
-        }}
-      />
     </div>
   );
 }

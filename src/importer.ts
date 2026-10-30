@@ -1,6 +1,12 @@
 // MIDI extraction adapted from Bach to Basics midi.worker.ts, MIT (see NOTICE).
 import { Midi } from "@tonejs/midi";
-import { unzipSync } from "fflate";
+import {
+  AsyncUnzipInflate,
+  strFromU8,
+  Unzip,
+  unzipSync,
+  type UnzipFile,
+} from "fflate";
 import { newId } from "./model";
 import type { Measure, Note, Song, Tempo, Track } from "./model";
 import { makeXml } from "./notation";
@@ -357,4 +363,247 @@ export function importScore(name: string, bytes: Uint8Array): Song {
   if (ext === "xml" || ext === "musicxml")
     return parseMusicXml(new TextDecoder().decode(bytes), title);
   throw Error("请选择 MIDI、MusicXML 或 MXL 文件");
+}
+
+const scoreExtension = /\.(mid|midi|xml|musicxml|mxl)$/i;
+type ScoreFile = { name: string; bytes: Uint8Array };
+type ZipEntry = { name: string; path: string; size: number; crc: number };
+const zipCrcTable = Uint32Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit++)
+    value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+  return value >>> 0;
+});
+
+function zipCrc(bytes: Uint8Array) {
+  let value = 0xffffffff;
+  for (const byte of bytes)
+    value = (value >>> 8) ^ zipCrcTable[(value ^ byte) & 255];
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function zipDirectory(bytes: Uint8Array): ZipEntry[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = bytes.length - 22;
+  while (
+    end >= Math.max(0, bytes.length - 65557) &&
+    view.getUint32(end, true) !== 0x06054b50
+  )
+    end--;
+  if (
+    end < 0 ||
+    view.getUint32(end, true) !== 0x06054b50 ||
+    end + 22 + view.getUint16(end + 20, true) !== bytes.length
+  )
+    throw Error("ZIP 文件损坏或格式不受支持");
+  const count = view.getUint16(end + 10, true);
+  let offset = view.getUint32(end + 16, true);
+  if (
+    view.getUint16(end + 4, true) ||
+    view.getUint16(end + 6, true) ||
+    count !== view.getUint16(end + 8, true)
+  )
+    throw Error("不支持分卷 ZIP，请先合并压缩包");
+  if (count === 65535 || offset === 0xffffffff)
+    throw Error("不支持 ZIP64，请使用普通 ZIP 压缩包");
+  const directoryEnd = offset + view.getUint32(end + 12, true);
+  if (directoryEnd > end) throw Error("ZIP 文件目录损坏");
+  const entries: ZipEntry[] = [];
+  const names = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    if (
+      offset + 46 > directoryEnd ||
+      view.getUint32(offset, true) !== 0x02014b50
+    )
+      throw Error("ZIP 文件目录损坏");
+    const flags = view.getUint16(offset + 8, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const next =
+      offset +
+      46 +
+      nameLength +
+      view.getUint16(offset + 30, true) +
+      view.getUint16(offset + 32, true);
+    if (next > directoryEnd) throw Error("ZIP 文件目录损坏");
+    const name = strFromU8(
+      bytes.subarray(offset + 46, offset + 46 + nameLength),
+      !(flags & 2048),
+    );
+    const path = name.replaceAll("\\", "/");
+    if (
+      /^[a-z]:|^\//i.test(path) ||
+      path.split("/").includes("..") ||
+      /[\0-\x1f]/.test(path)
+    )
+      throw Error("ZIP 包含不安全的文件路径");
+    if (names.has(path)) throw Error("ZIP 包含重复的文件路径");
+    names.add(path);
+    const local = view.getUint32(offset + 42, true);
+    if (local + 30 > bytes.length || view.getUint32(local, true) !== 0x04034b50)
+      throw Error("ZIP 文件头损坏");
+    if ((flags | view.getUint16(local + 6, true)) & 65)
+      throw Error("不支持加密 ZIP，请先解密压缩包");
+    const dataStart =
+      local +
+      30 +
+      view.getUint16(local + 26, true) +
+      view.getUint16(local + 28, true);
+    if (dataStart + view.getUint32(offset + 20, true) > directoryEnd)
+      throw Error("ZIP 文件内容不完整");
+    entries.push({
+      name,
+      path,
+      size: view.getUint32(offset + 24, true),
+      crc: view.getUint32(offset + 16, true),
+    });
+    offset = next;
+  }
+  if (offset !== directoryEnd) throw Error("ZIP 文件目录损坏");
+  return entries;
+}
+
+export async function unpackScoreFiles(
+  name: string,
+  bytes: Uint8Array,
+): Promise<ScoreFile[]> {
+  if (!/\.zip$/i.test(name)) {
+    if (!scoreExtension.test(name))
+      throw Error("请选择 MIDI、MusicXML、MXL 或 ZIP 文件");
+    if (bytes.length > 10 * 1024 * 1024) throw Error("文件超过 10 MB");
+    return [{ name, bytes }];
+  }
+  if (bytes.length > 50 * 1024 * 1024) throw Error("ZIP 文件超过 50 MB");
+  const entries = zipDirectory(bytes).filter(
+    (entry) =>
+      scoreExtension.test(entry.path) &&
+      !entry.path.split("/").includes("__MACOSX") &&
+      !/(^|\/)\._/.test(entry.path),
+  );
+  const preferred = entries.some((entry) =>
+    entry.path.split("/").slice(0, -1).includes("可直接导入"),
+  );
+  const selected = entries.filter(
+    (entry) =>
+      !preferred || entry.path.split("/").slice(0, -1).includes("可直接导入"),
+  );
+  if (!selected.length) throw Error("ZIP 中没有 MIDI、MusicXML 或 MXL 曲谱");
+  if (selected.length > 1000) throw Error("ZIP 中的曲谱超过 1000 首");
+  if (selected.some((entry) => entry.size > 10 * 1024 * 1024))
+    throw Error("ZIP 中的单首曲谱超过 10 MB");
+  if (
+    selected.reduce((total, entry) => total + entry.size, 0) >
+    100 * 1024 * 1024
+  )
+    throw Error("ZIP 解压后的曲谱总大小超过 100 MB");
+  const allowed = new Map(selected.map((entry) => [entry.name, entry]));
+  const files = await new Promise<Map<string, Uint8Array>>(
+    (resolve, reject) => {
+      const decoded = new Map<string, Uint8Array>();
+      const started = new Set<string>();
+      const active = new Set<UnzipFile>();
+      let failed = false,
+        inputDone = false,
+        total = 0;
+      const fail = (error: Error) => {
+        if (failed) return;
+        failed = true;
+        for (const file of active) file.terminate();
+        reject(error);
+      };
+      const finish = () => {
+        if (!failed && inputDone && decoded.size === selected.length)
+          resolve(decoded);
+      };
+      const stream = new Unzip((file) => {
+        const entry = allowed.get(file.name);
+        if (failed || !entry) return;
+        if (started.has(file.name)) {
+          fail(Error("ZIP 包含重复的文件路径"));
+          return;
+        }
+        started.add(file.name);
+        active.add(file);
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        file.ondata = (error, chunk, final) => {
+          if (failed) return;
+          if (error) {
+            fail(Error("ZIP 解压失败：" + error.message));
+            return;
+          }
+          size += chunk.length;
+          total += chunk.length;
+          if (size > 10 * 1024 * 1024) {
+            fail(Error("ZIP 中的单首曲谱超过 10 MB"));
+            return;
+          }
+          if (total > 100 * 1024 * 1024) {
+            fail(Error("ZIP 解压后的曲谱总大小超过 100 MB"));
+            return;
+          }
+          if (size > entry.size) {
+            fail(Error("ZIP 曲谱实际大小与声明不符，文件可能已损坏"));
+            return;
+          }
+          chunks.push(chunk);
+          if (final) {
+            if (size !== entry.size) {
+              fail(Error("ZIP 文件内容不完整"));
+              return;
+            }
+            const value = new Uint8Array(size);
+            let offset = 0;
+            for (const part of chunks) {
+              value.set(part, offset);
+              offset += part.length;
+            }
+            if (zipCrc(value) !== entry.crc) {
+              fail(Error("ZIP 曲谱校验失败，文件可能已损坏"));
+              return;
+            }
+            decoded.set(entry.name, value);
+            active.delete(file);
+            finish();
+          }
+        };
+        file.start();
+      });
+      stream.register(AsyncUnzipInflate);
+      void (async () => {
+        try {
+          const chunkSize = 16 * 1024;
+          for (
+            let offset = 0;
+            offset < bytes.length && !failed;
+            offset += chunkSize
+          ) {
+            const end = Math.min(offset + chunkSize, bytes.length);
+            stream.push(bytes.subarray(offset, end), end === bytes.length);
+            if (offset % (chunkSize * 16) === 0)
+              await new Promise<void>((done) => setTimeout(done, 0));
+          }
+          if (failed) return;
+          inputDone = true;
+          if (started.size !== selected.length)
+            fail(Error("ZIP 文件内容不完整"));
+          else finish();
+        } catch (error) {
+          fail(Error("ZIP 解压失败：" + String(error)));
+        }
+      })();
+    },
+  );
+  const result: ScoreFile[] = [];
+  const duplicates = new Map<string, Uint8Array[]>();
+  for (const entry of selected) {
+    const value = files.get(entry.name)!;
+    const key = `${entry.size}:${entry.crc}`;
+    const previous = duplicates.get(key) ?? [];
+    if (previous.some((other) => value.every((byte, i) => byte === other[i])))
+      continue;
+    previous.push(value);
+    duplicates.set(key, previous);
+    result.push({ name: entry.path, bytes: value });
+  }
+  return result;
 }

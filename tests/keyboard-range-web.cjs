@@ -2,6 +2,7 @@ const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { openFixture } = require("./browser-fixture.cjs");
 
 const base = process.env.QINXI_WEB_URL || "http://localhost:4173/";
 const artifacts = path.resolve(__dirname, "../test-results");
@@ -219,18 +220,7 @@ async function singleFarNoteReturns(page) {
 async function importFixture(page) {
   await page.goto(base);
   await page.locator(".music-card").first().waitFor();
-  const [chooser] = await Promise.all([
-    page.waitForEvent("filechooser"),
-    page.getByRole("button", { name: "导入曲谱", exact: true }).click(),
-  ]);
-  await chooser.setFiles({
-    name: `${title}.musicxml`,
-    mimeType: "application/xml",
-    buffer: Buffer.from(score),
-  });
-  await page.locator(".modal .track select").selectOption("staff");
-  await page.getByLabel("自动生成缺失指法", { exact: true }).uncheck();
-  await page.getByRole("button", { name: "加入曲库", exact: true }).click();
+  await openFixture(page, `${title}.musicxml`, Buffer.from(score));
   await readyScore(page);
   await settings(page, "设备");
   await page.locator("#settings-device .device-status button").click();

@@ -3,6 +3,7 @@ const path = require("node:path"),
   fs = require("node:fs/promises"),
   assert = require("node:assert/strict");
 const { chromium, webkit } = require("playwright");
+const { openFixture } = require("./browser-fixture.cjs");
 const root = path.resolve(__dirname, ".."),
   base = process.env.QINXI_WEB_URL || "http://localhost:4173",
   artifacts = path.join(root, "test-results");
@@ -238,19 +239,17 @@ async function run(engine, name) {
       path: path.join(artifacts, `网页竖屏-${name}.png`),
     });
     await page.getByRole("button", { name: "曲库", exact: true }).tap();
-    const [chooser] = await Promise.all([
-      page.waitForEvent("filechooser"),
-      page.getByRole("button", { name: "导入曲谱", exact: true }).click(),
-    ]);
-    await chooser.setFiles({
-      name: "网页测试.musicxml",
-      mimeType: "application/xml",
-      buffer: Buffer.from(
+    await openFixture(
+      page,
+      "网页测试.musicxml",
+      Buffer.from(
         '<score-partwise version="4.0"><part-list><score-part id="P"><part-name>Piano</part-name></score-part></part-list><part id="P"><measure number="1"><attributes><divisions>1</divisions><time><beats>3</beats><beat-type>4</beat-type></time><staves>2</staves></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><staff>1</staff></note><note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><staff>1</staff></note><note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><staff>1</staff></note><backup><duration>3</duration></backup><note><pitch><step>C</step><octave>3</octave></pitch><duration>3</duration><staff>2</staff></note></measure></part></score-partwise>',
       ),
-    });
-    await page.getByRole("button", { name: "加入曲库", exact: true }).tap();
+    );
     await page.getByTitle("更多设置", { exact: true }).tap();
+    await page.getByRole("tab", { name: "设备", exact: true }).tap();
+    await page.getByRole("button", { name: "连接钢琴", exact: true }).tap();
+    await page.getByLabel("MIDI 输入").selectOption("test-in");
     await page.getByRole("tab", { name: "练习", exact: true }).tap();
     await page.getByLabel("练习双手", { exact: true }).selectOption("right");
     await page.locator(".panel-heading button").tap();
@@ -312,7 +311,7 @@ async function run(engine, name) {
           : []),
         "移除进度条、谱面垂直居中",
         "用户点击后请求MIDI",
-        "文件导入与100%评分",
+        "真实解析的本地fixture与100%评分",
         "单手自由跟弹无软件 NoteOn 输出",
         "IndexedDB记录与曲库重载",
         ...(name === "chromium" ? ["断网重载与谱面缓存"] : []),

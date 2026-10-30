@@ -17,7 +17,9 @@
     "licenses": "node scripts/licenses.cjs",
     "web": "node scripts/web-server.cjs",
     "test:web": "node tests/web-smoke.cjs",
-    "test:toolbar": "node tests/web-toolbar.cjs"
+    "test:toolbar": "node tests/web-toolbar.cjs",
+    "import:scores": "node scripts/import-scores.cjs",
+    "test:import-cli": "node --test tests/import-scores-cli.cjs"
   },
   "devDependencies": {
     "@tonejs/midi": "^2.0.28",

@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { Midi } from "@tonejs/midi";
 import { zipSync, strToU8 } from "fflate";
-import { importScore, parseMusicXml } from "../src/importer";
+import { importScore, parseMusicXml, unpackScoreFiles } from "../src/importer";
 import { demos } from "../src/demos";
 import { makeXml } from "../src/notation";
 const score = `<score-partwise version="4.0"><work><work-title>测试</work-title></work><part-list><score-part id="P1"><part-name>钢琴</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes><direction><sound tempo="90"/></direction><note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="start"/></note><note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><tie type="stop"/></note><note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration></note><note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration></note></measure></part></score-partwise>`;
@@ -241,4 +241,190 @@ it("拒绝实体展开、脚本和事件属性，包括带命名空间的脚本"
       "实体",
     ),
   ).toThrow(/实体/);
+});
+
+describe("ZIP 曲谱包", () => {
+  const midi = () => {
+    const value = new Midi();
+    value.addTrack().addNote({ midi: 60, time: 0, duration: 1 });
+    return value.toArray();
+  };
+  const changeDirectory = (
+    bytes: Uint8Array,
+    update: (view: DataView, offset: number) => void,
+  ) => {
+    const copy = bytes.slice();
+    const view = new DataView(copy.buffer);
+    for (let offset = 0; offset + 46 <= copy.length; offset++)
+      if (view.getUint32(offset, true) === 0x02014b50) update(view, offset);
+    return copy;
+  };
+
+  it("单文件原样传递，MXL 不作为曲谱包拆开", async () => {
+    const bytes = midi();
+    expect(await unpackScoreFiles("单曲.mid", bytes)).toEqual([
+      { name: "单曲.mid", bytes },
+    ]);
+    const mxl = zipSync({
+      "META-INF/container.xml": strToU8(
+        '<container><rootfiles><rootfile full-path="score.xml"/></rootfiles></container>',
+      ),
+      "score.xml": strToU8(score),
+    });
+    const files = await unpackScoreFiles("原谱.mxl", mxl);
+    expect(files).toHaveLength(1);
+    expect(files[0].bytes).toEqual(mxl);
+    expect(importScore(files[0].name, files[0].bytes).notes).toHaveLength(3);
+    await expect(unpackScoreFiles("说明.txt", strToU8("x"))).rejects.toThrow(
+      "ZIP",
+    );
+  });
+
+  it("读取多目录曲谱并忽略辅助文件、Mac 元数据与嵌套 ZIP", async () => {
+    const zip = zipSync({
+      "分类/测试.mid": midi(),
+      "原谱/测试.musicxml": strToU8(score),
+      "说明.txt": strToU8("readme"),
+      "目录.csv": strToU8("title,file"),
+      "__MACOSX/._测试.mid": strToU8("metadata"),
+      "原谱/._测试.musicxml": strToU8("metadata"),
+      "其他曲库.zip": zipSync({ "曲目.mid": midi() }),
+    });
+    const files = await unpackScoreFiles("曲库.ZIP", zip);
+    expect(files.map((file) => file.name)).toEqual([
+      "分类/测试.mid",
+      "原谱/测试.musicxml",
+    ]);
+    expect(importScore("测试.mid", files[0].bytes).notes).toHaveLength(1);
+    expect(importScore("测试.musicxml", files[1].bytes).notes).toHaveLength(3);
+  });
+
+  it("个人曲谱包仅导入可直接导入目录，避免备份与异常曲谱重复入库", async () => {
+    const zip = zipSync({
+      "完美钢琴曲谱/可直接导入/中文流行/曲目.mid": midi(),
+      "完美钢琴曲谱/MIDI备份/备份.mid": midi(),
+      "完美钢琴曲谱/需检查/损坏.mid": strToU8("bad"),
+      "完美钢琴曲谱/原谱其他版本/版本.musicxml": strToU8(score),
+      "完美钢琴曲谱/来源与校验.json": strToU8("{}"),
+    });
+    const files = await unpackScoreFiles("完美钢琴.zip", zip);
+    expect(files.map((file) => file.name)).toEqual([
+      "完美钢琴曲谱/可直接导入/中文流行/曲目.mid",
+    ]);
+  });
+
+  it("按文件字节去重，保留不同的编配文件", async () => {
+    const bytes = midi();
+    const files = await unpackScoreFiles(
+      "重复.zip",
+      zipSync({
+        "歌曲.mid": bytes,
+        "备份/歌曲.mid": bytes,
+        "不同编配.xml": strToU8(score),
+      }),
+    );
+    expect(files.map((file) => file.name)).toEqual([
+      "歌曲.mid",
+      "不同编配.xml",
+    ]);
+  });
+
+  it("空包、损坏包、加密包及校验不符会明确报错", async () => {
+    await expect(unpackScoreFiles("空.zip", zipSync({}))).rejects.toThrow(
+      "没有",
+    );
+    await expect(
+      unpackScoreFiles("只有说明.zip", zipSync({ "说明.txt": strToU8("x") })),
+    ).rejects.toThrow("没有");
+    await expect(
+      unpackScoreFiles("坏.zip", new Uint8Array([1, 2, 3])),
+    ).rejects.toThrow("损坏");
+    const zip = zipSync({ "测试.mid": midi() }, { level: 0 });
+    const encrypted = changeDirectory(zip, (view, offset) =>
+      view.setUint16(offset + 8, view.getUint16(offset + 8, true) | 1, true),
+    );
+    await expect(unpackScoreFiles("加密.zip", encrypted)).rejects.toThrow(
+      "加密",
+    );
+    const corrupted = changeDirectory(zip, (view, offset) =>
+      view.setUint32(offset + 16, 0, true),
+    );
+    await expect(unpackScoreFiles("损坏.zip", corrupted)).rejects.toThrow(
+      "校验失败",
+    );
+  });
+
+  it("拒绝绝对路径及正反斜杠路径穿越", async () => {
+    for (const name of [
+      "../曲目.mid",
+      "目录/../../曲目.mid",
+      "..\\曲目.mid",
+      "/曲目.mid",
+      "C:\\曲目.mid",
+    ]) {
+      await expect(
+        unpackScoreFiles("不安全.zip", zipSync({ [name]: midi() })),
+      ).rejects.toThrow("路径");
+    }
+    const files = await unpackScoreFiles(
+      "Windows路径.zip",
+      zipSync({ "分类\\曲目.mid": midi() }),
+    );
+    expect(files[0].name).toBe("分类/曲目.mid");
+  });
+
+  it("拒绝伪造原始大小和前缀 CRC 的压缩流，不能静默截断成有效 MIDI", async () => {
+    const clean = midi();
+    const expanded = new Uint8Array(1024 * 1024).fill(65);
+    expanded.set(clean);
+    const prefixZip = zipSync({ "曲目.mid": clean });
+    let prefixCrc = 0;
+    changeDirectory(prefixZip, (view, offset) => {
+      prefixCrc = view.getUint32(offset + 16, true);
+    });
+    const forged = changeDirectory(
+      zipSync({ "曲目.mid": expanded }),
+      (view, offset) => {
+        view.setUint32(offset + 24, clean.length, true);
+        view.setUint32(offset + 16, prefixCrc, true);
+        // Both headers agree, but the actual DEFLATE stream expands to 1 MiB.
+        const local = view.getUint32(offset + 42, true);
+        view.setUint32(local + 22, clean.length, true);
+        view.setUint32(local + 14, prefixCrc, true);
+      },
+    );
+    await expect(unpackScoreFiles("伪造大小.zip", forged)).rejects.toThrow(
+      "实际大小与声明不符",
+    );
+  });
+
+  it("在分配解压内存之前限制单曲大小、总大小及曲目数量", async () => {
+    const zip = zipSync({ "曲目.mid": midi() });
+    const tooLarge = changeDirectory(zip, (view, offset) =>
+      view.setUint32(offset + 24, 10 * 1024 * 1024 + 1, true),
+    );
+    await expect(unpackScoreFiles("大曲目.zip", tooLarge)).rejects.toThrow(
+      "单首曲谱超过 10 MB",
+    );
+    const many = Object.fromEntries(
+      Array.from({ length: 1001 }, (_, index) => [`${index}.mid`, midi()]),
+    );
+    await expect(unpackScoreFiles("太多.zip", zipSync(many))).rejects.toThrow(
+      "超过 1000",
+    );
+    const total = changeDirectory(
+      zipSync(
+        Object.fromEntries(
+          Array.from({ length: 11 }, (_, i) => [`${i}.mid`, midi()]),
+        ),
+      ),
+      (view, offset) => view.setUint32(offset + 24, 10 * 1024 * 1024, true),
+    );
+    await expect(unpackScoreFiles("解压过大.zip", total)).rejects.toThrow(
+      "总大小超过 100 MB",
+    );
+    await expect(
+      unpackScoreFiles("压缩包过大.zip", new Uint8Array(50 * 1024 * 1024 + 1)),
+    ).rejects.toThrow("ZIP 文件超过 50 MB");
+  });
 });

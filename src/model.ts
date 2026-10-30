@@ -110,6 +110,7 @@ export interface Library {
   lastSong: string;
   favorites?: string[];
   toolbarPosition?: "top" | "bottom";
+  showFingering?: boolean;
 }
 export function selected(n: Note, hand: Hand) {
   return hand === "both" || n.hand === hand;
