@@ -27,23 +27,43 @@ self.addEventListener("fetch", (event) => {
     return;
   event.respondWith(
     (async () => {
-      const cache = await caches.open(CACHE);
       const request =
         event.request.mode === "navigate"
           ? new Request(new URL("index.html", self.registration.scope))
           : event.request;
-      const cached =
-        (await cache.match(request, { ignoreSearch: true })) ||
-        (await caches.match(request));
-      if (event.request.mode === "navigate") {
+      const score = /\/catalogue\/.*\.(mid|midi|xml|musicxml|mxl)$/i.test(
+        new URL(request.url).pathname,
+      );
+      let cache, cached;
+      try {
+        cache = await caches.open(CACHE);
+      } catch {}
+      try {
+        cached =
+          (cache && (await cache.match(request, { ignoreSearch: true }))) ||
+          (await caches.match(request, { ignoreSearch: true }));
+      } catch {}
+      const network = async () => {
+        const response = await fetch(event.request);
+        if (score && response.ok && cache) {
+          try {
+            await cache.put(request, response.clone());
+          } catch {}
+        }
+        return response;
+      };
+      if (
+        event.request.mode === "navigate" ||
+        (score && event.request.cache === "reload")
+      ) {
         try {
-          const response = await fetch(event.request);
+          const response = await network();
           return response.ok ? response : cached || response;
         } catch {
           return cached || Response.error();
         }
       }
-      return cached || fetch(event.request);
+      return cached || network();
     })(),
   );
 });

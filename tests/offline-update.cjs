@@ -10,7 +10,9 @@ const { chromium } = require("playwright");
     "utf8",
   );
   let version = "A",
+    scoreVersion = "A",
     allowUpdate = true;
+  const scoreRequests = { selected: 0, unopened: 0 };
   const server = http.createServer((request, response) => {
     response.setHeader("Cache-Control", "no-cache");
     if (request.url === "/sw.js") {
@@ -29,6 +31,13 @@ const { chromium } = require("playwright");
       response.end(
         `<!doctype html><h1>Update fixture</h1><script src="./assets/${version}.js"></script><script>navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).catch(()=>{});</script>`,
       );
+    } else if (/^\/catalogue\/(selected|unopened)\.mid$/.test(request.url)) {
+      const name = request.url.includes("selected.mid")
+        ? "selected"
+        : "unopened";
+      scoreRequests[name]++;
+      response.setHeader("Content-Type", "audio/midi");
+      response.end(Buffer.from(`${name}-${scoreVersion}`));
     } else if (/^\/assets\/[AB]\.js$/.test(request.url)) {
       response.setHeader("Content-Type", "text/javascript");
       response.end(
@@ -43,10 +52,48 @@ const { chromium } = require("playwright");
     const page = await context.newPage();
     const url = `http://127.0.0.1:${server.address().port}/`;
     const shown = () => page.locator("html").getAttribute("data-version");
+    const fetchScore = (name, cache = "default") =>
+      page.evaluate(
+        async ({ name, cache }) =>
+          (await fetch(`./catalogue/${name}.mid`, { cache })).text(),
+        { name, cache },
+      );
     await page.goto(url);
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.waitForFunction(() => !!navigator.serviceWorker.controller);
     assert.equal(await shown(), "A");
+    assert.deepEqual(
+      scoreRequests,
+      { selected: 0, unopened: 0 },
+      "安装时不应预取曲谱",
+    );
+    assert.equal(await fetchScore("selected", "reload"), "selected-A");
+    assert.deepEqual(scoreRequests, { selected: 1, unopened: 0 });
+    assert.equal(
+      await page.evaluate(async () =>
+        (
+          await (
+            await caches.open("qinxi-web-A")
+          ).match("./catalogue/selected.mid")
+        ).text(),
+      ),
+      "selected-A",
+      "选中的曲谱应存入当前构建缓存",
+    );
+    assert.equal(await fetchScore("selected"), "selected-A");
+    assert.equal(scoreRequests.selected, 1, "重复普通请求应复用曲谱缓存");
+    scoreVersion = "B";
+    assert.equal(await fetchScore("selected", "reload"), "selected-B");
+    assert.equal(
+      scoreRequests.selected,
+      2,
+      "reload 应联网获取同名曲谱的新内容",
+    );
+    await context.setOffline(true);
+    assert.equal(await fetchScore("selected", "reload"), "selected-B");
+    await assert.rejects(() => fetchScore("unopened"));
+    assert.deepEqual(scoreRequests, { selected: 2, unopened: 0 });
+    await context.setOffline(false);
     await page.evaluate(
       () =>
         new Promise((resolve, reject) => {
@@ -104,6 +151,17 @@ const { chromium } = require("playwright");
     await context.setOffline(true);
     await page.reload();
     assert.equal(await shown(), "B", "新构建完整缓存后可离线重载");
+    assert.equal(
+      await fetchScore("selected"),
+      "selected-B",
+      "构建更新后仍可从保留的曲谱缓存离线读取",
+    );
+    await assert.rejects(() => fetchScore("unopened"));
+    assert.deepEqual(
+      scoreRequests,
+      { selected: 2, unopened: 0 },
+      "未打开曲谱始终不应自动预取",
+    );
     const record = await page.evaluate(
       () =>
         new Promise((resolve, reject) => {
@@ -131,6 +189,13 @@ const { chromium } = require("playwright");
         incompleteUpdateKeepsOfflineBuild: true,
         offlineAfterUpdate: true,
         indexedDBPreserved: true,
+        scoresPrecached: false,
+        selectedScoreRuntimeCached: true,
+        reloadRefreshesSelectedScore: true,
+        selectedScoreOffline: true,
+        unopenedScoreOfflineFails: true,
+        previousBuildScoreCacheRetained: true,
+        scoreRequests,
       }),
     );
   } finally {

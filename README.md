@@ -68,6 +68,8 @@ docker compose up -d --build
 
 第一条默认只预览，不写文件。输入要求、ZIP 限额、来源标注与回滚步骤见 [服务端导入说明](docs/服务端导入.md)。生产 Nginx 容器只提供静态文件，导入工具在源码或构建环境运行。优先使用 MusicXML/MXL 保留原谱信息；声部分配可在曲目设置中调整，指法在进入单曲后生成。
 
+曲库首页只读取列表信息，选中一首时才下载、解析和生成这首曲谱。已打开曲目的谱面、指法和声部分配会保存在本机，返回或刷新后直接复用；文件 SHA 或解析版本变化时，仅在再次选中该曲时重建。未打开曲目不预取、不提前计算，小节数和时长在打开后显示。
+
 MIDI 显示为“自动转谱”：按十六分音符量化，保留完整八分三连音，练习使用原始演奏时间，不保证还原出版谱或自动推断可靠指法。复杂总谱建议先提取钢琴声部。反复、房子、D.C./D.S./Coda 保留显示，判定按书写顺序进行，不自动展开；需要反复可用 A/B 循环。装饰音仅显示，移调声部请先导出实音谱。不支持 PDF、图片或音频转谱。
 
 两份曲库索引独立保留，既有曲目 ID 不变。流行曲的原曲及编配权利归原权利人，不适用应用的 MIT 或公共谱的 CC0 许可，逐曲来源见 [来源说明](NOTICE.md)。此前保存在浏览器的曲谱和记录继续保留；服务端新导入的曲谱随下一次静态构建或 Docker 镜像发布。
@@ -84,7 +86,7 @@ iPad Safari 当前不提供原生 Web MIDI。iPad 可用 MIDIWeb Browser 的 MID
 
 练琴时段同样仅存当前浏览器，单独写入 IndexedDB，不上传服务器。进行中的时段每 5 秒保存快照，暂停、完成或离开时收尾；意外关闭时可能损失最后一次快照后的几秒。练习成绩保留在记录页的折叠区。
 
-HTTPS / localhost 首次完整缓存后可离线重载。首次访问仍需能连接站点；离线缓存和个人曲库是两套存储，部署更新不需要清空个人数据。更新步骤见 [部署说明](docs/部署说明.md#更新与离线缓存)。
+HTTPS / localhost 首次缓存页面和音源后可离线重载，已打开的曲谱可离线继续练习；未打开的曲目首次需要连接服务器。离线缓存和个人曲库是两套存储，部署更新不需要清空个人数据。更新步骤见 [部署说明](docs/部署说明.md#更新与离线缓存)。
 
 ## 开发与检查
 
@@ -102,6 +104,7 @@ npx playwright install chromium webkit
 npm run test:web
 npm run test:toolbar
 node tests/display-fingering-web.cjs
+node tests/catalogue-lazy-web.cjs
 node tests/playback-web.cjs
 node tests/keyboard-range-web.cjs
 node tests/practice-time-web.cjs

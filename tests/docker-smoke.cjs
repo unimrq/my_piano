@@ -88,16 +88,28 @@ const request = (url, method = "GET") =>
   );
   assert(files.some((file) => /fingering\.worker-.*\.js$/.test(file)));
   assert(files.some((file) => /licenses\/PianoPlayer-MIT\.txt$/.test(file)));
-  assert.equal(pop.length, 4);
-  assert.equal(
-    files.filter((file) => /^\.\/catalogue\/personal-.*\.mid$/.test(file))
-      .length,
-    pop.length,
+  assert(files.includes("./catalogue/manifest.json"));
+  assert(
+    files.every(
+      (file) => !/^\.\/catalogue\/.*\.(mid|midi|xml|musicxml|mxl)$/i.test(file),
+    ),
+    "曲谱应按需缓存，不应出现在预缓存列表中",
   );
+  for (const id of [
+    "personal-moon",
+    "personal-name",
+    "personal-sunny",
+    "personal-porcelain",
+  ])
+    assert(
+      pop.some((score) => score.id === id),
+      id,
+    );
   for (const score of pop) {
-    assert(files.includes("./catalogue/" + score.file), score.file);
-    assert.doesNotMatch(score.license, /CC0|MIT/i, score.title);
-    assert(score.attribution && score.sourceUrl, score.title);
+    if (score.id.startsWith("personal-")) {
+      assert.doesNotMatch(score.license, /CC0|MIT/i, score.title);
+      assert(score.attribution && score.sourceUrl, score.title);
+    }
     const resource = await request("/catalogue/" + score.file);
     assert.equal(resource.status, 200, score.file);
     assert.equal(
@@ -184,6 +196,7 @@ const request = (url, method = "GET") =>
   assert.equal(manifest.length, 5);
   for (const score of manifest) {
     const resource = await request("/catalogue/" + score.file);
+    assert.equal(resource.status, 200, score.file);
     assert.equal(
       createHash("sha256").update(resource.body).digest("hex"),
       score.sha256,
@@ -207,6 +220,7 @@ const request = (url, method = "GET") =>
     JSON.stringify({
       passed: true,
       cachedResources: files.length,
+      scoreCache: "on-demand",
       publicScores: manifest.length,
       popScores: pop.length,
       bundledScores: manifest.length + pop.length,

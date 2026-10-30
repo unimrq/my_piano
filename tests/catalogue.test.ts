@@ -67,13 +67,22 @@ it("欢乐颂开头旋律及长音低音按原谱保留，摇篮曲弱起不加�
   expect(lullaby.measures[1].beat).toBe(1);
 });
 it("内置四首流行 MIDI 保留来源全部音符及原双手声部", () => {
-  const personal = JSON.parse(
+  const allPersonal = JSON.parse(
     fs.readFileSync("src/personal-catalogue.json", "utf8"),
+  );
+  const originalIds = new Set([
+    "personal-moon",
+    "personal-name",
+    "personal-sunny",
+    "personal-porcelain",
+  ]);
+  const personal = allPersonal.filter((entry: { id: string }) =>
+    originalIds.has(entry.id),
   );
   expect(personal).toHaveLength(4);
   expect(
-    new Set([...manifest, ...personal].map((entry) => entry.id)).size,
-  ).toBe(9);
+    new Set([...manifest, ...allPersonal].map((entry) => entry.id)).size,
+  ).toBe(manifest.length + allPersonal.length);
   for (const entry of personal) {
     const bytes = fs.readFileSync(path.join(root, entry.file));
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(entry.sha256);

@@ -17,7 +17,7 @@ import { Trainer } from "./trainer";
 import { MidiDevices } from "./midi";
 import { PianoAudio } from "./pianoAudio";
 import { makeXml } from "./notation";
-import { applyFingering, generateFingering } from "./fingering";
+import { generateFingering } from "./fingering";
 import type { HandSize } from "./vendor/pianoplayer";
 import Sheet from "./Sheet";
 import Roll from "./Roll";
@@ -37,7 +37,11 @@ import {
   loadPracticeSpans,
   savePracticeSpans,
 } from "./browserStore";
-import { loadCatalogue } from "./catalogue";
+import {
+  isCatalogueSongLoaded,
+  loadCatalogue,
+  loadCatalogueSong,
+} from "./catalogue";
 import {
   browserFullscreenElement,
   fullscreenHelp,
@@ -101,6 +105,8 @@ export default function App() {
   const [handSize, setHandSize] = useState<HandSize>("M");
   const [fingerStatus, setFingerStatus] = useState("");
   const fingerAttempts = useRef(new Set<string>());
+  const songLoad = useRef<AbortController | null>(null);
+  const [loadingSongId, setLoadingSongId] = useState<string | null>(null);
   const [home, setHome] = useState(true);
   const [settingsTab, setSettingsTab] = useState<
     "practice" | "device" | "display"
@@ -142,10 +148,11 @@ export default function App() {
     !song.notes.some((n) => n.finger) &&
     !/<fingering[\s>]/.test(song.xml);
   const preparingScore =
-    showFingering &&
-    !freePlay &&
-    missingFingers &&
-    (!fingerAttempts.current.has(song.id) || busy);
+    loadingSongId !== null ||
+    (showFingering &&
+      !freePlay &&
+      missingFingers &&
+      (!fingerAttempts.current.has(song.id) || busy));
   const libRef = useRef(library),
     settingsRef = useRef(settings);
   libRef.current = library;
@@ -262,26 +269,86 @@ export default function App() {
       settings: { ...lib.settings, [songId]: next },
     }));
   };
-  const choose = (s: Song) => {
-    setLibrary((l) => ({
-      ...l,
-      songs: l.songs.some((item) => item.id === s.id)
-        ? l.songs
-        : [...l.songs, s],
-    }));
+  const cancelSongLoad = () => {
+    if (!songLoad.current) return;
+    songLoad.current.abort();
+    songLoad.current = null;
+    setLoadingSongId(null);
+    setBusy(false);
+    setSongId(libRef.current.lastSong);
+  };
+  const choose = async (s: Song) => {
+    cancelSongLoad();
+    const controller = new AbortController();
+    songLoad.current = controller;
+    pause();
+    setError("");
     setHome(false);
-    setLoopTool(false);
-    const config = library.settings[s.id] ?? {
-      ...defaults,
-      to: s.measures.length,
-      inputId: settings.inputId,
-      outputId: settings.outputId,
-    };
-    reset(s, config);
-    setSettings(config);
     setSongId(s.id);
-    setLibrary((l) => ({ ...l, lastSong: s.id }));
     setPanel(null);
+    const cached = isCatalogueSongLoaded(s);
+    if (!cached) {
+      setLoadingSongId(s.id);
+      setBusy(true);
+    }
+    try {
+      const loaded = cached
+        ? s
+        : await loadCatalogueSong(s, {
+            signal: controller.signal,
+            split: libRef.current.settings[s.id]?.split ?? defaults.split,
+          });
+      if (songLoad.current !== controller) return;
+      const stored = libRef.current.settings[loaded.id];
+      const config = stored
+        ? { ...stored }
+        : {
+            ...defaults,
+            to: loaded.measures.length,
+            inputId: settingsRef.current.inputId,
+            outputId: settingsRef.current.outputId,
+          };
+      // Metadata entries have a placeholder measure until their first opening.
+      // Keep preferences changed on the home page, but initialize the real range.
+      if (s.catalogue && !s.notes.length) {
+        config.from = 1;
+        config.to = loaded.measures.length;
+        config.loop = false;
+        config.startBeat = undefined;
+      }
+      config.from = Math.max(1, Math.min(loaded.measures.length, config.from));
+      config.to = Math.max(
+        config.from,
+        Math.min(loaded.measures.length, config.to),
+      );
+      reset(loaded, config);
+      setSettings(config);
+      setSongId(loaded.id);
+      setLibrary((current) => ({
+        ...current,
+        songs: current.songs.some((item) => item.id === loaded.id)
+          ? current.songs.map((item) => (item.id === loaded.id ? loaded : item))
+          : [...current.songs, loaded],
+        settings: { ...current.settings, [loaded.id]: config },
+        lastSong: loaded.id,
+      }));
+      setHome(false);
+      setLoopTool(false);
+      setPanel(null);
+    } catch (error) {
+      if (songLoad.current === controller && !controller.signal.aborted)
+        setError(`曲谱读取失败：${s.title}。${String(error)}`);
+      if (songLoad.current === controller) {
+        setHome(true);
+        setSongId(libRef.current.lastSong);
+      }
+    } finally {
+      if (songLoad.current === controller) {
+        songLoad.current = null;
+        setLoadingSongId(null);
+        setBusy(false);
+      }
+    }
   };
   async function save(data: Library) {
     if (unsafeLoad.current) return;
@@ -317,10 +384,10 @@ export default function App() {
   }
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       try {
-        const [bundled, saved, spans] = await Promise.all([
-          loadCatalogue(),
+        const [saved, spans] = await Promise.all([
           loadBrowserLibrary(),
           loadPracticeSpans(),
         ]);
@@ -338,66 +405,69 @@ export default function App() {
         const replacing = !!saved && saved.collection !== "piano-scores-v2";
         if (replacing) await backupBrowserLibrary(saved!);
         const previous = saved;
-        const byId = new Map(previous?.songs.map((s) => [s.id, s]) ?? []);
-        const merged = bundled.map((s) => {
-          const previous = byId.get(s.id);
-          if (!previous) return s;
-          const next = { ...s, tracks: previous.tracks };
-          const fingers = new Map(previous.notes.map((n) => [n.id, n]));
-          next.notes = s.notes.map((n) => {
-            const saved = fingers.get(n.id);
-            return saved?.midi === n.midi &&
-              saved.beat === n.beat &&
-              saved.duration === n.duration
-              ? { ...n, finger: n.finger ?? saved.finger }
-              : n;
-          });
-          if (s.warning?.startsWith("自动转谱")) {
-            next.xml = makeXml(next);
-          } else if (next.notes.some((n) => n.finger)) {
-            return applyFingering(next, {
-              fingers: Object.fromEntries(
-                next.notes
-                  .filter((n) => n.finger)
-                  .map((n) => [n.id, n.finger!]),
-              ),
-              skipped: 0,
-            });
-          }
-          return next;
-        });
-        const songs = [
-          ...merged,
-          ...(previous?.songs
-            .filter(
-              (s) =>
-                (!replacing ||
-                  s.source !== "builtin" ||
-                  s.id.startsWith("daily-")) &&
-                !merged.some((b) => b.id === s.id),
-            )
-            .map((s) =>
-              s.source === "midi" ? { ...s, xml: makeXml(s) } : s,
-            ) ?? []),
-        ];
+        const visited = new Set([
+          previous?.lastSong,
+          ...Object.keys(previous?.settings ?? {}),
+          ...(previous?.results.map((result) => result.songId) ?? []),
+          ...(spans?.map((span) => span.songId) ?? []),
+        ]);
+        // Old versions eagerly parsed the whole catalogue. Keep useful legacy
+        // annotations, while unvisited server songs become lightweight entries.
+        const cached =
+          previous?.songs.filter(
+            (song) =>
+              song.catalogue ||
+              song.source !== "builtin" ||
+              song.id.startsWith("daily-") ||
+              visited.has(song.id) ||
+              song.notes.some((note) => note.finger),
+          ) ?? [];
+        let songs: Song[];
+        try {
+          const bundled = await loadCatalogue(cached, controller.signal);
+          const ids = new Set(bundled.map((song) => song.id));
+          songs = [
+            ...bundled,
+            ...cached.filter(
+              (song) =>
+                !ids.has(song.id) &&
+                (song.source !== "builtin" ||
+                  song.id.startsWith("daily-") ||
+                  song.notes.length > 0),
+            ),
+          ];
+        } catch (error) {
+          if (cancelled) return;
+          if (!previous?.songs.length) throw error;
+          songs = previous.songs;
+          setNotice("曲库检查失败，继续使用本机曲库。");
+        }
+        if (cancelled) return;
         const selected =
           songs.find((s) => s.id === previous?.lastSong) ?? songs[0];
         const config = previous?.settings[selected.id] ?? {
           ...defaults,
           to: selected.measures.length,
         };
-        const data: Library = {
-          version: 1,
-          collection: "piano-scores-v2",
-          songs,
-          settings: previous?.settings ?? {},
-          results: saved?.results ?? [],
-          lastSong: selected.id,
-          favorites: previous?.favorites ?? [],
-          toolbarPosition:
-            previous?.toolbarPosition === "bottom" ? "bottom" : "top",
-          showFingering: previous?.showFingering !== false,
-        };
+        const unchanged =
+          previous?.collection === "piano-scores-v2" &&
+          previous.lastSong === selected.id &&
+          previous.songs.length === songs.length &&
+          previous.songs.every((song, index) => song === songs[index]);
+        const data: Library = unchanged
+          ? previous
+          : {
+              version: 1,
+              collection: "piano-scores-v2",
+              songs,
+              settings: previous?.settings ?? {},
+              results: saved?.results ?? [],
+              lastSong: selected.id,
+              favorites: previous?.favorites ?? [],
+              toolbarPosition:
+                previous?.toolbarPosition === "bottom" ? "bottom" : "top",
+              showFingering: previous?.showFingering !== false,
+            };
         setLibrary(data);
         setSongId(selected.id);
         setSettings(config);
@@ -413,8 +483,13 @@ export default function App() {
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
+  useEffect(() => () => songLoad.current?.abort(), []);
+  useEffect(() => {
+    if (panel && panel !== "library") cancelSongLoad();
+  }, [panel]);
   useEffect(() => {
     if (!ready) return;
     const timer = setTimeout(() => void save(library), 350);
@@ -839,6 +914,7 @@ export default function App() {
         <button
           className="back-library"
           onClick={() => {
+            cancelSongLoad();
             pause();
             setHome(true);
             setPanel(null);
@@ -861,6 +937,7 @@ export default function App() {
           <select
             className="practice-mode"
             aria-label="练习模式"
+            disabled={!!loadingSongId}
             value={settings.mode}
             onChange={(event) =>
               configure({ mode: event.target.value as Settings["mode"] })
@@ -889,6 +966,7 @@ export default function App() {
                     aria-label="速度"
                     aria-valuetext={`${Math.round((currentTempo * settings.speed) / 100)} BPM`}
                     type="range"
+                    disabled={!!loadingSongId}
                     min="25"
                     max="150"
                     step="1"
@@ -907,6 +985,7 @@ export default function App() {
                 <button
                   className={`icon-button metronome-button${settings.metronome ? " active" : ""}`}
                   aria-label="节拍器"
+                  disabled={!!loadingSongId}
                   aria-pressed={settings.metronome}
                   title="节拍器"
                   onClick={() => configure({ metronome: !settings.metronome })}
@@ -914,7 +993,11 @@ export default function App() {
                   <Icon name="metronome" />
                 </button>
               </div>
-              <button onClick={restart} title="回到第一小节">
+              <button
+                onClick={restart}
+                title="回到第一小节"
+                disabled={!!loadingSongId}
+              >
                 <Icon name="restart" />
                 重来
               </button>
@@ -925,6 +1008,7 @@ export default function App() {
                     : "loop-toggle"
                 }
                 aria-label="重复工具"
+                disabled={!!loadingSongId}
                 aria-pressed={loopTool || settings.loop}
                 title="在曲谱上拖选小节"
                 onClick={() => {
@@ -984,74 +1068,82 @@ export default function App() {
       )}
       {!home && (
         <main>
-          <section
-            className="sheet"
-            style={{ height: `${settings.sheetHeight}%` }}
-            aria-busy={preparingScore}
-          >
-            {preparingScore ? (
-              <div className="sheet-loading" role="status">
-                正在准备曲谱…
-              </div>
-            ) : (
-              <Sheet
-                xml={song.xml}
-                showFingering={showFingering}
-                beat={Math.max(e.start, e.beat)}
-                trainer={e}
-                loopTool={freePlay ? false : loopTool}
-                onLoop={([from, to]) => {
-                  const running = engine.current.running;
-                  configure({ from, to, loop: true });
-                  if (running)
-                    engine.current.startRun(performance.now(), false);
-                  setLoopTool(false);
-                }}
-                onSeek={(beat) =>
-                  configure({
-                    from:
-                      (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                        0) + 1,
-                    to: Math.max(
-                      settings.to,
-                      (song.measures.findLast((m) => m.beat <= beat)?.index ??
-                        0) + 1,
-                    ),
-                    startBeat: beat,
-                  })
-                }
-              />
-            )}
-          </section>
-          <input
-            className="resize"
-            aria-label="曲谱区域高度"
-            type="range"
-            min="22"
-            max="48"
-            value={settings.sheetHeight}
-            onChange={(v) => {
-              displaySettings({ sheetHeight: Number(v.target.value) });
-            }}
-          />
-          {freePlay ? (
-            <FreePlay
-              session={freeSession.current}
-              pitches={keyboardPitches}
-              onInput={receiveInput}
-              paused={freePaused}
-              minWhiteKeys={settings.minWhiteKeys}
-              split={settings.split}
-              registerMode={settings.registerMode}
-            />
+          {loadingSongId ? (
+            <div className="sheet-loading" role="status">
+              正在准备曲谱…
+            </div>
           ) : (
-            <Roll
-              song={song}
-              settings={settings}
-              trainer={e}
-              pitches={keyboardPitches}
-              onInput={receiveInput}
-            />
+            <>
+              <section
+                className="sheet"
+                style={{ height: `${settings.sheetHeight}%` }}
+                aria-busy={preparingScore}
+              >
+                {preparingScore ? (
+                  <div className="sheet-loading" role="status">
+                    正在准备曲谱…
+                  </div>
+                ) : (
+                  <Sheet
+                    xml={song.xml}
+                    showFingering={showFingering}
+                    beat={Math.max(e.start, e.beat)}
+                    trainer={e}
+                    loopTool={freePlay ? false : loopTool}
+                    onLoop={([from, to]) => {
+                      const running = engine.current.running;
+                      configure({ from, to, loop: true });
+                      if (running)
+                        engine.current.startRun(performance.now(), false);
+                      setLoopTool(false);
+                    }}
+                    onSeek={(beat) =>
+                      configure({
+                        from:
+                          (song.measures.findLast((m) => m.beat <= beat)
+                            ?.index ?? 0) + 1,
+                        to: Math.max(
+                          settings.to,
+                          (song.measures.findLast((m) => m.beat <= beat)
+                            ?.index ?? 0) + 1,
+                        ),
+                        startBeat: beat,
+                      })
+                    }
+                  />
+                )}
+              </section>
+              <input
+                className="resize"
+                aria-label="曲谱区域高度"
+                type="range"
+                min="22"
+                max="48"
+                value={settings.sheetHeight}
+                onChange={(v) => {
+                  displaySettings({ sheetHeight: Number(v.target.value) });
+                }}
+              />
+              {freePlay ? (
+                <FreePlay
+                  session={freeSession.current}
+                  pitches={keyboardPitches}
+                  onInput={receiveInput}
+                  paused={freePaused}
+                  minWhiteKeys={settings.minWhiteKeys}
+                  split={settings.split}
+                  registerMode={settings.registerMode}
+                />
+              ) : (
+                <Roll
+                  song={song}
+                  settings={settings}
+                  trainer={e}
+                  pitches={keyboardPitches}
+                  onInput={receiveInput}
+                />
+              )}
+            </>
           )}
         </main>
       )}
@@ -1139,6 +1231,9 @@ export default function App() {
                       aria-selected={settingsTab === id}
                       aria-controls={`settings-${id}`}
                       id={`tab-${id}`}
+                      disabled={
+                        id === "practice" && !isCatalogueSongLoaded(song)
+                      }
                       onClick={() => setSettingsTab(id)}
                     >
                       {label}
@@ -1410,7 +1505,10 @@ export default function App() {
                         />
                       </label>
                     </section>
-                    <details className="settings-advanced">
+                    <details
+                      className="settings-advanced"
+                      hidden={!isCatalogueSongLoaded(song)}
+                    >
                       <summary>声部分配</summary>
                       {song.tracks.map((t) => (
                         <label className="field track" key={t.id}>

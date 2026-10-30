@@ -31,14 +31,15 @@ async function write<T>(key: string, value: T) {
     tx.onerror = () => reject(tx.error);
   });
 }
-async function encodeLibrary(
-  data: Library,
-): Promise<Library | CompressedLibrary> {
-  const estimatedBytes = data.songs.reduce(
+const estimatedLibraryBytes = (data: Library) =>
+  data.songs.reduce(
     (total, song) => total + song.xml.length * 2 + song.notes.length * 200,
     0,
   );
-  if (estimatedBytes <= 32 * 1024 * 1024) return data;
+async function encodeLibrary(
+  data: Library,
+): Promise<Library | CompressedLibrary> {
+  if (estimatedLibraryBytes(data) <= 32 * 1024 * 1024) return data;
   const input = new TextEncoder().encode(JSON.stringify(data));
   const compressed = await new Promise<Uint8Array>((resolve, reject) =>
     gzip(input, { level: 4, consume: true }, (error, result) =>
@@ -68,9 +69,15 @@ export async function loadBrowserLibrary() {
         error ? reject(error) : resolve(result),
       ),
     );
-    return JSON.parse(new TextDecoder().decode(bytes)) as Library;
+    const data = JSON.parse(new TextDecoder().decode(bytes)) as Library;
+    lastSavedLibrary = data;
+    return data;
   }
-  if (saved) return saved;
+  if (saved) {
+    if (estimatedLibraryBytes(saved) <= 32 * 1024 * 1024)
+      lastSavedLibrary = saved;
+    return saved;
+  }
   const legacy = localStorage.getItem("qinxi-library");
   if (!legacy) return null;
   const data = JSON.parse(legacy) as Library;

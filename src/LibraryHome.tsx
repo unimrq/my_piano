@@ -2,6 +2,7 @@ import { challengeDate, dailyChallenge } from "./daily";
 import Icon, { type IconName } from "./Icon";
 import { useEffect, useMemo, useState } from "react";
 import { beatToSeconds, type Song, type Library } from "./model";
+import { isCatalogueSongLoaded } from "./catalogue";
 type Section = "all" | "favorites" | "recent" | "imports" | "daily";
 const duration = (song: Song) => {
   const t = Math.round(beatToSeconds(song.duration, song.tempos));
@@ -238,9 +239,14 @@ export default function LibraryHome({
                       <span className={`level level-${s.difficulty ?? "初级"}`}>
                         {s.difficulty ?? "自选"}
                       </span>
-                      <span>{s.measures.length} 小节</span>
-                      <span>{duration(s)}</span>
-                      {s.warning?.startsWith("自动转谱") && (
+                      {isCatalogueSongLoaded(s) && (
+                        <>
+                          <span>{s.measures.length} 小节</span>
+                          <span>{duration(s)}</span>
+                        </>
+                      )}
+                      {(s.warning?.startsWith("自动转谱") ||
+                        /\.midi?$/i.test(s.catalogue?.file ?? "")) && (
                         <span>自动转谱</span>
                       )}
                       {best !== null && (

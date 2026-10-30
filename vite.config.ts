@@ -36,7 +36,14 @@ export default defineConfig({
           .replace("__BUILD_ID__", hash.digest("hex").slice(0, 16))
           .replace(
             '["__PRECACHE_FILES__"]',
-            JSON.stringify(files.map((file) => "./" + file)),
+            JSON.stringify(
+              files
+                .filter(
+                  (file) =>
+                    !/^catalogue\/.*\.(mid|midi|xml|musicxml|mxl)$/i.test(file),
+                )
+                .map((file) => "./" + file),
+            ),
           );
         await fs.writeFile("dist/sw.js", worker);
       },

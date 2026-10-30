@@ -33,6 +33,7 @@ export interface Tempo {
   bpm: number;
 }
 export interface Song {
+  catalogue?: { file: string; sha256?: string; revision?: string };
   id: string;
   title: string;
   source: "builtin" | "midi" | "musicxml";
