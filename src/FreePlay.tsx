@@ -91,7 +91,12 @@ export default function FreePlay({
       content.style.width = `${5200 / count}%`;
       content.style.transform = `translateX(${(-low * 100) / 52}%)`;
       width = (holder.clientWidth * 52) / count;
-      keyHeight = Math.max(160, Math.min(250, holder.clientHeight * 0.35));
+      keyHeight = Math.round(
+        Math.min(
+          Math.max(160, Math.min(250, holder.clientHeight * 0.35)),
+          Math.max(72, holder.clientHeight - 80),
+        ),
+      );
       height = Math.max(80, holder.clientHeight - keyHeight);
       const ratio = window.devicePixelRatio || 1;
       plot.width = Math.round(width * ratio);

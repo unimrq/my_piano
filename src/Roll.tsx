@@ -87,10 +87,15 @@ export default function Roll({
     const motion = !window.matchMedia("(prefers-reduced-motion: reduce)")
       .matches;
     const width = surface.current!.clientWidth;
-    const keyHeight = () =>
-      Math.round(
-        Math.max(160, Math.min(250, host.current!.clientHeight * 0.4)),
+    const keyHeight = () => {
+      const height = host.current!.clientHeight;
+      return Math.round(
+        Math.min(
+          Math.max(160, Math.min(250, height * 0.4)),
+          Math.max(72, height - 80),
+        ),
       );
+    };
     host.current.style.setProperty("--key-height", `${keyHeight()}px`);
     keyCanvas.current.style.height = `${keyHeight()}px`;
     keyCanvas.current.style.flexBasis = `${keyHeight()}px`;
@@ -101,7 +106,7 @@ export default function Roll({
     };
     const falling = new FallingNotesRenderer({
       width,
-      height: Math.max(100, host.current.clientHeight - keyHeight()),
+      height: Math.max(80, host.current.clientHeight - keyHeight()),
       viewportSeconds: 5,
       showFingering: false,
       showHandColors: true,
@@ -141,6 +146,20 @@ export default function Roll({
           );
       },
     });
+    const resize = () => {
+      if (!roll.current) return;
+      const w = surface.current!.clientWidth,
+        height = keyHeight(),
+        h = Math.max(80, host.current!.clientHeight - height);
+      falling.resize(w, h);
+      keys.resize(w, height);
+      host.current!.style.setProperty("--key-height", `${height}px`);
+      keyCanvas.current!.style.height = `${height}px`;
+      keyCanvas.current!.style.flexBasis = `${height}px`;
+      spawned.current.clear();
+      restoreKeys = true;
+      last.current = -Infinity;
+    };
     Promise.all([
       falling.init(rollCanvas.current),
       keys.init(keyCanvas.current),
@@ -153,6 +172,7 @@ export default function Roll({
         }
         roll.current = falling;
         keyboard.current = keys;
+        resize();
         last.current = -Infinity;
         const current = latest.current.song;
         falling.setOptions({
@@ -295,20 +315,7 @@ export default function Roll({
       .catch((e) => {
         if (!disposed) setError("渲染初始化失败：" + String(e));
       });
-    const observer = new ResizeObserver(() => {
-      if (roll.current) {
-        const w = surface.current!.clientWidth,
-          h = Math.max(100, host.current!.clientHeight - keyHeight());
-        falling.resize(w, h);
-        keys.resize(w, keyHeight());
-        host.current!.style.setProperty("--key-height", `${keyHeight()}px`);
-        keyCanvas.current!.style.height = `${keyHeight()}px`;
-        keyCanvas.current!.style.flexBasis = `${keyHeight()}px`;
-        spawned.current.clear();
-        restoreKeys = true;
-        last.current = -Infinity;
-      }
-    });
+    const observer = new ResizeObserver(resize);
     observer.observe(surface.current!);
     return () => {
       disposed = true;

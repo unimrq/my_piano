@@ -1973,8 +1973,8 @@ aside {
   }
   .web-app.practice-focus > header {
     flex-wrap: wrap;
-    padding-top: 4px;
-    padding-bottom: 4px;
+    gap: 0 6px;
+    padding: 4px 8px;
   }
   .web-app.practice-focus .toolbar {
     flex: 0 0 100%;
@@ -2114,6 +2114,74 @@ aside {
   .tempo-tools {
     border: 0;
     padding: 0;
+  }
+}
+
+@media (max-width: 600px), (max-width: 950px) and (max-height: 500px) {
+  .web-app.practice-focus .song-button {
+    overflow: hidden;
+  }
+  .web-app.practice-focus .song-name {
+    display: block;
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .web-app.practice-focus .toolbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    min-width: 0;
+    max-height: 50px;
+    scrollbar-width: thin;
+  }
+  .web-app.practice-focus .toolbar > * {
+    flex-shrink: 0;
+  }
+  .web-app.practice-focus .toolbar > .playback-toggle {
+    order: -2;
+  }
+  .web-app.practice-focus .toolbar > .icon-button:last-child {
+    order: -1;
+  }
+  .web-app.practice-focus .toolbar > button.clear-notes {
+    width: auto;
+    font-size: 14px;
+  }
+  .web-app.practice-focus .tempo-reading {
+    display: inline;
+  }
+  .web-app.practice-focus .back-library {
+    flex: 0 0 44px;
+    padding: 0;
+    font-size: 0;
+  }
+}
+@media (max-width: 950px) and (max-height: 500px) {
+  .web-app.practice-focus > header {
+    flex-wrap: nowrap;
+    gap: 6px;
+    min-height: 48px;
+    padding: 0 8px;
+  }
+  .web-app.practice-focus .song-button {
+    flex: 0 1 22vw;
+    max-width: 180px;
+  }
+  .web-app.practice-focus .toolbar {
+    flex: 1 1 0;
+  }
+  .web-app.practice-focus .sheet {
+    min-height: 60px;
+    max-height: calc(100% - 164px);
+  }
+  .web-app.practice-focus .upstream-renderer {
+    min-height: 152px !important;
+  }
+  .web-app.practice-focus .upstream-roll {
+    min-height: 80px;
   }
 }
 

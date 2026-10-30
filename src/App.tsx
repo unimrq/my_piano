@@ -899,7 +899,9 @@ export default function App() {
           onClick={() => setPanel(panel === "library" ? null : "library")}
           title="打开曲库"
         >
-          <span className="song-name">{song.title}</span>
+          <span className="song-name" title={song.title}>
+            {song.title}
+          </span>
           <Icon name="chevron" />
         </button>
         <div className="toolbar">
@@ -917,7 +919,12 @@ export default function App() {
             <option value="listen">示范播放</option>
           </select>
           {freePlay ? (
-            <button onClick={() => freeSession.current.clear()}>清空</button>
+            <button
+              className="clear-notes"
+              onClick={() => freeSession.current.clear()}
+            >
+              清空
+            </button>
           ) : (
             <>
               <div className="tempo-tools">
