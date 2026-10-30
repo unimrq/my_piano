@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import {
   defaults,
+  DEFAULT_MIN_WHITE_KEYS,
   newId,
   playbackNotes,
   roleNote,
@@ -1403,13 +1404,18 @@ export default function App() {
                           min="7"
                           max="52"
                           step="1"
-                          defaultValue={settings.minWhiteKeys ?? 21}
+                          defaultValue={
+                            settings.minWhiteKeys ?? DEFAULT_MIN_WHITE_KEYS
+                          }
                           onBlur={(event) => {
                             const count = Math.max(
                               7,
                               Math.min(
                                 52,
-                                Math.round(Number(event.target.value) || 21),
+                                Math.round(
+                                  Number(event.target.value) ||
+                                    DEFAULT_MIN_WHITE_KEYS,
+                                ),
                               ),
                             );
                             event.target.value = String(count);

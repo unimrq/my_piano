@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import "pixi.js/unsafe-eval";
 import { PianoKeyboard } from "./vendor/bach/PianoKeyboard";
 import type { FreePlaySession } from "./freeSession";
+import { DEFAULT_MIN_WHITE_KEYS } from "./model";
 import { KeyboardRange, pianoWhites as whites } from "./keyboardRange";
 export default function FreePlay({
   session,
   pitches,
   onInput,
-  minWhiteKeys = 21,
+  minWhiteKeys = DEFAULT_MIN_WHITE_KEYS,
   split = 60,
   registerMode = "follow",
   paused = false,
@@ -45,10 +46,10 @@ export default function FreePlay({
       height = 0,
       keyHeight = 180,
       low = 16,
-      count = 21;
+      count = DEFAULT_MIN_WHITE_KEYS;
     let pausedAt: number | null = null;
     let restoreKeys = false;
-    const viewport = new KeyboardRange([16, 37]);
+    const viewport = new KeyboardRange([16, 16 + DEFAULT_MIN_WHITE_KEYS]);
     viewport.reset(pitches);
     viewport.update(
       [],

@@ -69,7 +69,9 @@ export interface Settings {
   inputId: string;
   outputId: string;
 }
+export const DEFAULT_MIN_WHITE_KEYS = 28;
 export const defaults: Settings = {
+  minWhiteKeys: DEFAULT_MIN_WHITE_KEYS,
   speed: 75,
   hand: "both",
   mode: "wait",

@@ -4,6 +4,7 @@ import {
   beatToSeconds,
   practiceNotes,
   playbackNotes,
+  DEFAULT_MIN_WHITE_KEYS,
   type Song,
   type Settings,
 } from "./model";
@@ -31,7 +32,7 @@ export default function Roll({
     current.reset(pitches);
     current.update(
       [],
-      settings.minWhiteKeys ?? 21,
+      settings.minWhiteKeys ?? DEFAULT_MIN_WHITE_KEYS,
       settings.registerMode ?? "follow",
       performance.now() / 1000,
     );
@@ -180,7 +181,8 @@ export default function Roll({
           const time = beatToSeconds(trainer.beat, song.tempos);
           const startTime = beatToSeconds(trainer.start, song.tempos);
           const mode = latest.current.settings.registerMode ?? "follow";
-          const minimum = latest.current.settings.minWhiteKeys ?? 21;
+          const minimum =
+            latest.current.settings.minWhiteKeys ?? DEFAULT_MIN_WHITE_KEYS;
           const focus =
             trainer.settings.mode === "wait"
               ? trainer.target.map((n) => n.midi)

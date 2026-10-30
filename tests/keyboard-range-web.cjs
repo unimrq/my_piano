@@ -181,8 +181,8 @@ async function singleFarNoteReturns(page) {
     { timeout: 5000 },
   );
   const distant = Number(await keys(page).getAttribute("data-first-white"));
-  assert(distant <= 51 && distant + 21 > 51, "平移后未显示按下的C8");
-  await widthIs(page, 21);
+  assert(distant <= 51 && distant + 28 > 51, "平移后未显示按下的C8");
+  await widthIs(page, 28);
   const releasedAt = await page.evaluate(() => {
     rangeNote(108, 0);
     return performance.now();
@@ -213,7 +213,7 @@ async function singleFarNoteReturns(page) {
     observationStart,
   );
   const counts = [...new Set(observations.map((entry) => entry.count))];
-  assert.deepEqual(counts, [21], "单个远音使键盘宽度发生变化");
+  assert.deepEqual(counts, [28], "单个远音使键盘宽度发生变化");
   return { home, distant, returnMs: Math.round(elapsed), historyNotes, counts };
 }
 async function importFixture(page) {
@@ -259,7 +259,7 @@ async function importFixture(page) {
   page.on("pageerror", (error) => errors.push(String(error)));
   try {
     await importFixture(page);
-    await widthIs(page, 21);
+    await widthIs(page, 28);
     await page.evaluate(() => rangeProbe.reset());
     assert.equal(
       await page.getByLabel("练习模式", { exact: true }).inputValue(),
@@ -278,26 +278,26 @@ async function importFixture(page) {
     await page.locator(".result-score").waitFor();
     assert.match(await page.locator(".result-score").textContent(), /100/);
     assert.match(await page.locator(".result").textContent(), /正确\s*100/);
-    report.complete100Notes = await stableObservations(page, 21);
+    report.complete100Notes = await stableObservations(page, 28);
     await page.getByRole("button", { name: "完成", exact: true }).click();
 
     for (const hand of ["left", "right", "both"]) {
       await settings(page, "练习");
       await page.getByLabel("练习双手", { exact: true }).selectOption(hand);
       await closeSettings(page);
-      await widthIs(page, 21);
+      await widthIs(page, 28);
     }
     await mode(page, "listen");
     await page.getByRole("button", { name: "播放", exact: true }).click();
     await page.getByRole("button", { name: "暂停", exact: true }).waitFor();
     await page.waitForTimeout(1000);
-    await widthIs(page, 21);
+    await widthIs(page, 28);
     await page.getByRole("button", { name: "暂停", exact: true }).click();
     await mode(page, "rhythm");
-    await widthIs(page, 21);
+    await widthIs(page, 28);
     await mode(page, "free");
     await page.getByLabel("上升音符", { exact: true }).waitFor();
-    await widthIs(page, 21);
+    await widthIs(page, 28);
     report.freeSingleFarNoteReturns = await singleFarNoteReturns(page);
     await page.evaluate(() => {
       rangeNote(24, 100);
@@ -309,23 +309,23 @@ async function importFixture(page) {
         "2",
     );
     await page.waitForTimeout(1000);
-    await widthIs(page, 21);
+    await widthIs(page, 28);
     await page.evaluate(() => {
       rangeNote(24, 0);
       rangeNote(108, 0);
     });
-    await dragKeyboard(page, 21);
-    report.sameSongHandsModesAndFarKeys = await stableObservations(page, 21);
+    await dragKeyboard(page, 28);
+    report.sameSongHandsModesAndFarKeys = await stableObservations(page, 28);
     await page.screenshot({
-      path: path.join(artifacts, "keyboard-range-21.png"),
+      path: path.join(artifacts, "keyboard-range-default-28.png"),
     });
     await page.evaluate(() => rangeProbe.stop());
 
     await settings(page, "显示");
-    await page.getByLabel("最少显示白键数", { exact: true }).fill("28");
+    await page.getByLabel("最少显示白键数", { exact: true }).fill("21");
     await page.getByLabel("最少显示白键数", { exact: true }).press("Tab");
     await closeSettings(page);
-    await widthIs(page, 28);
+    await widthIs(page, 21);
     await page.evaluate(() => rangeProbe.reset());
     await page.evaluate(() => {
       rangeNote(24, 100);
@@ -336,10 +336,15 @@ async function importFixture(page) {
       rangeNote(24, 0);
       rangeNote(108, 0);
     });
-    await dragKeyboard(page, 28);
-    await mode(page, "wait");
-    await widthIs(page, 28);
-    report.explicitMinimum28 = await stableObservations(page, 28);
+    await dragKeyboard(page, 21);
+    for (const value of ["wait", "listen", "rhythm", "free", "wait"]) {
+      await mode(page, value);
+      await widthIs(page, 21);
+    }
+    report.explicitMinimum21 = await stableObservations(page, 21);
+    await page.screenshot({
+      path: path.join(artifacts, "keyboard-range-explicit-21.png"),
+    });
     await page.evaluate(() => rangeProbe.stop());
 
     await settings(page, "显示");
@@ -367,7 +372,7 @@ async function importFixture(page) {
     if (await porcelain.count()) {
       await porcelain.first().click();
       await readyScore(page);
-      await widthIs(page, 30);
+      await widthIs(page, 28);
       await page.evaluate(() => rangeProbe.reset());
       const paper = await page.locator(".sheet").boundingBox();
       await page.mouse.move(
@@ -388,16 +393,16 @@ async function importFixture(page) {
       const measure = page.locator('.sheet-host [data-measure="10"]').first();
       await measure.scrollIntoViewIfNeeded();
       await measure.click();
-      await widthIs(page, 30);
+      await widthIs(page, 28);
       await page.getByRole("button", { name: "重来", exact: true }).click();
       await page.getByLabel("速度", { exact: true }).press("End");
-      await widthIs(page, 30);
+      await widthIs(page, 28);
       report.porcelain = {
         skipped: false,
-        ...(await stableObservations(page, 30)),
+        ...(await stableObservations(page, 28)),
       };
       await page.screenshot({
-        path: path.join(artifacts, "keyboard-range-porcelain-30.png"),
+        path: path.join(artifacts, "keyboard-range-porcelain-28.png"),
       });
     } else {
       report.porcelain = {
