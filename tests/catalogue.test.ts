@@ -66,79 +66,72 @@ it("欢乐颂开头旋律及长音低音按原谱保留，摇篮曲弱起不加�
   expect(lullaby.measures[0]).toMatchObject({ label: "0", length: 1 });
   expect(lullaby.measures[1].beat).toBe(1);
 });
-it.skipIf(!fs.existsSync("src/personal-catalogue.json"))(
-  "本机流行 MIDI 保留来源全部音符及原双手声部",
-  () => {
-    const personal = JSON.parse(
-      fs.readFileSync("src/personal-catalogue.json", "utf8"),
-    );
-    expect(personal).toHaveLength(4);
-    for (const entry of personal) {
-      const bytes = fs.readFileSync(path.join(root, entry.file));
-      expect(createHash("sha256").update(bytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-      const song = importScore(entry.file, bytes);
-      expect(song.notes.length, entry.title).toBe(entry.expectedNotes);
-      expect(
-        song.tracks.map((t) => t.role),
-        entry.title,
-      ).toEqual(["right", "left"]);
-      expect(song.notes.some((n) => n.hand === "right")).toBe(true);
-      expect(song.notes.some((n) => n.hand === "left")).toBe(true);
-      expect(song.warning).toContain("自动转谱");
-      expect(entry.license).not.toContain("CC0");
-      const score = parseMusicXml(song.xml, song.title);
-      expect(score.notes.length, entry.title).toBe(song.notes.length);
-      const source = [...song.notes].sort(
-        (a, b) =>
-          a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
-      );
-      const shown = [...score.notes].sort(
-        (a, b) =>
-          a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
-      );
-      for (const [i, note] of source.entries()) {
-        expect(
-          [shown[i].midi, shown[i].hand],
-          `${entry.title} 第 ${note.measure + 1} 小节`,
-        ).toEqual([note.midi, note.hand]);
-        expect(Math.abs(shown[i].beat - note.beat)).toBeLessThanOrEqual(
-          0.125001,
-        );
-        expect(
-          Math.abs(
-            shown[i].beat + shown[i].duration - note.beat - note.duration,
-          ),
-        ).toBeLessThanOrEqual(0.125001);
-      }
-    }
-  },
-);
-it.skipIf(!fs.existsSync(path.join(root, "personal-name.mid")))(
-  "本机《刻在我心底的名字》339音往返谱面后音高、双手、起音和时值全部保留",
-  () => {
-    const bytes = fs.readFileSync(path.join(root, "personal-name.mid"));
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
-      "65e677cf3085acfb3de864f73f48770e257157b03b45350bd8f68be3c3f2432c",
-    );
-    const song = importScore("personal-name.mid", bytes);
+it("内置四首流行 MIDI 保留来源全部音符及原双手声部", () => {
+  const personal = JSON.parse(
+    fs.readFileSync("src/personal-catalogue.json", "utf8"),
+  );
+  expect(personal).toHaveLength(4);
+  expect(
+    new Set([...manifest, ...personal].map((entry) => entry.id)).size,
+  ).toBe(9);
+  for (const entry of personal) {
+    const bytes = fs.readFileSync(path.join(root, entry.file));
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(entry.sha256);
+    const song = importScore(entry.file, bytes);
+    expect(song.notes.length, entry.title).toBe(entry.expectedNotes);
+    expect(
+      song.tracks.map((t) => t.role),
+      entry.title,
+    ).toEqual(["right", "left"]);
+    expect(song.notes.some((n) => n.hand === "right")).toBe(true);
+    expect(song.notes.some((n) => n.hand === "left")).toBe(true);
+    expect(song.warning).toContain("自动转谱");
+    expect(entry.license).not.toMatch(/CC0|MIT/i);
+    expect(entry.attribution.length).toBeGreaterThan(0);
+    expect(entry.sourceUrl).toMatch(/^https:\/\//);
     const score = parseMusicXml(song.xml, song.title);
-    expect(song.notes).toHaveLength(339);
-    expect(score.notes).toHaveLength(339);
-    const timing = (notes: typeof song.notes) =>
-      notes
-        .map((n) => ({
-          midi: n.midi,
-          hand: n.hand,
-          beat: Number(n.beat.toFixed(10)),
-          duration: Number(n.duration.toFixed(10)),
-        }))
-        .sort(
-          (a, b) =>
-            a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
-        );
-    expect(timing(score.notes)).toEqual(timing(song.notes));
-    expect(song.xml.match(/<time-modification>/g)).toHaveLength(3);
-  },
-);
+    expect(score.notes.length, entry.title).toBe(song.notes.length);
+    const source = [...song.notes].sort(
+      (a, b) =>
+        a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
+    );
+    const shown = [...score.notes].sort(
+      (a, b) =>
+        a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
+    );
+    for (const [i, note] of source.entries()) {
+      expect(
+        [shown[i].midi, shown[i].hand],
+        `${entry.title} 第 ${note.measure + 1} 小节`,
+      ).toEqual([note.midi, note.hand]);
+      expect(Math.abs(shown[i].beat - note.beat)).toBeLessThanOrEqual(0.125001);
+      expect(
+        Math.abs(shown[i].beat + shown[i].duration - note.beat - note.duration),
+      ).toBeLessThanOrEqual(0.125001);
+    }
+  }
+});
+it("内置《刻在我心底的名字》339音往返谱面后音高、双手、起音和时值全部保留", () => {
+  const bytes = fs.readFileSync(path.join(root, "personal-name.mid"));
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+    "65e677cf3085acfb3de864f73f48770e257157b03b45350bd8f68be3c3f2432c",
+  );
+  const song = importScore("personal-name.mid", bytes);
+  const score = parseMusicXml(song.xml, song.title);
+  expect(song.notes).toHaveLength(339);
+  expect(score.notes).toHaveLength(339);
+  const timing = (notes: typeof song.notes) =>
+    notes
+      .map((n) => ({
+        midi: n.midi,
+        hand: n.hand,
+        beat: Number(n.beat.toFixed(10)),
+        duration: Number(n.duration.toFixed(10)),
+      }))
+      .sort(
+        (a, b) =>
+          a.beat - b.beat || a.midi - b.midi || a.hand.localeCompare(b.hand),
+      );
+  expect(timing(score.notes)).toEqual(timing(song.notes));
+  expect(song.xml.match(/<time-modification>/g)).toHaveLength(3);
+});

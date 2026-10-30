@@ -48,13 +48,16 @@ npm run web
 
 ## 曲库与导入
 
-公共曲库包含 5 首 Noctave CC0 入门双手谱：《欢乐颂》《小星星》《摇篮曲》《月光下》《雅克兄弟（两只老虎旋律）》。保留来源 MusicXML 原文件，逐曲来源及 SHA-256 见 [曲库索引](public/catalogue/manifest.json)。
+默认曲库共 9 首，克隆源码或构建 Docker 镜像均会收录：
+
+- 5 首 Noctave CC0 入门双手谱：《欢乐颂》《小星星》《摇篮曲》《月光下》《雅克兄弟（两只老虎旋律）》，保留来源 MusicXML 原文件，来源及 SHA-256 见 [公共曲库索引](public/catalogue/manifest.json)。
+- 4 首已有双手 MIDI：《月亮代表我的心》《刻在我心底的名字（C调简单版）》《晴天》《青花瓷》，原文件未改写，来源及 SHA-256 见 [流行曲索引](src/personal-catalogue.json)。前两首标初级，后两首保留完整编配并标中级。
 
 “导入曲谱”支持 `.mid`、`.midi`、`.xml`、`.musicxml` 和 `.mxl`，确认声部分配后才加入本地曲库。优先使用合法获取的 MusicXML/MXL，可以保留原谱的音高、节奏、谱号、调号和指法；显示由本地引擎重新排版。
 
 MIDI 显示为“自动转谱”：按十六分音符量化，保留完整八分三连音，练习使用原始演奏时间，不保证还原出版谱或自动推断可靠指法。复杂总谱建议先提取钢琴声部。反复、房子、D.C./D.S./Coda 保留显示，判定按书写顺序进行，不自动展开；需要反复可用 A/B 循环。装饰音仅显示，移调声部请先导出实音谱。不支持 PDF、图片或音频转谱。
 
-本机个人流行曲索引 `src/personal-catalogue.json` 和 `public/catalogue/personal-*.mid` 已排除 Git，克隆此仓库不会获得这些文件。可在网页内导入自己的曲谱，导入文件不会上传服务器。应用 MIT 许可不代表曲目或编配许可，详见 [来源说明](NOTICE.md)。
+两份曲库索引独立保留，既有曲目 ID 不变。流行曲的原曲及编配权利归原权利人，不适用应用的 MIT 或公共谱的 CC0 许可，逐曲来源见 [来源说明](NOTICE.md)。在网页内另行导入的曲谱只保存在当前浏览器，不会上传服务器或进入镜像。
 
 ## 浏览器与本地数据
 
@@ -101,7 +104,7 @@ node tests/practice-time-web.cjs
 
 和弦在谱面只显示一个指法：右手取有标注的最高音，左手取有标注的最低音，减少数字堆叠。完整建议仍保留在曲谱数据中。
 
-Docker 可在项目目录运行 `docker compose up -d --build`，默认打开 `http://localhost:8080/`；远程访问使用 HTTPS 反向代理。镜像构建包含核心测试，GitHub Actions 另检查容器启动、资源完整性与运行权限。配置细节见[部署说明](docs/部署说明.md#docker-部署)，运行结果见 [Docker 检查](https://github.com/unimrq/my_piano/actions/workflows/docker.yml)。
+Docker 可在项目目录运行 `docker compose up -d --build`，默认打开 `http://localhost:8080/`，可看到上述 9 首曲目；更新源码后再次运行同一命令重建即可。远程访问使用 HTTPS 反向代理。镜像构建包含核心测试，GitHub Actions 另检查容器启动、资源完整性与运行权限。配置细节见[部署说明](docs/部署说明.md#docker-部署)，对应提交的运行结果见 [Docker 检查](https://github.com/unimrq/my_piano/actions/workflows/docker.yml)。
 
 ## 自由练习
 

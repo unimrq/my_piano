@@ -2,8 +2,12 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const root = path.resolve(__dirname, "..");
+const pop = JSON.parse(
+  readFileSync(path.join(root, "src/personal-catalogue.json"), "utf8"),
+);
 const docker = (...args) =>
   execFileSync("docker", args, { cwd: root, encoding: "utf8" }).trim();
 const inside = (...args) => docker("compose", "exec", "-T", "piano", ...args);
@@ -58,7 +62,7 @@ const request = (url, method = "GET") =>
   );
   assert.equal(
     inside("sh", "-c", "find /usr/share/nginx/html -name 'personal-*' | wc -l"),
-    "0",
+    "4",
   );
 
   const page = await request("/");
@@ -84,7 +88,24 @@ const request = (url, method = "GET") =>
   );
   assert(files.some((file) => /fingering\.worker-.*\.js$/.test(file)));
   assert(files.some((file) => /licenses\/PianoPlayer-MIT\.txt$/.test(file)));
-  assert(!files.some((file) => /personal-/i.test(file)));
+  assert.equal(pop.length, 4);
+  assert.equal(
+    files.filter((file) => /^\.\/catalogue\/personal-.*\.mid$/.test(file))
+      .length,
+    pop.length,
+  );
+  for (const score of pop) {
+    assert(files.includes("./catalogue/" + score.file), score.file);
+    assert.doesNotMatch(score.license, /CC0|MIT/i, score.title);
+    assert(score.attribution && score.sourceUrl, score.title);
+    const resource = await request("/catalogue/" + score.file);
+    assert.equal(resource.status, 200, score.file);
+    assert.equal(
+      createHash("sha256").update(resource.body).digest("hex"),
+      score.sha256,
+      score.file,
+    );
+  }
   assert(files.includes("./audio/piano/manifest.json"));
   const audioManifest = await request("/audio/piano/manifest.json");
   assert.equal(audioManifest.status, 200);
@@ -187,13 +208,15 @@ const request = (url, method = "GET") =>
       passed: true,
       cachedResources: files.length,
       publicScores: manifest.length,
+      popScores: pop.length,
+      bundledScores: manifest.length + pop.length,
       pianoSamples: piano.samples.length,
       pianoBytes,
       pianoLicenseChecked: true,
       nonRoot: true,
       readOnly: true,
       restrictedPermissions: true,
-      privateScoresExcluded: true,
+      popScoresChecked: true,
     }),
   );
 })().catch((error) => {

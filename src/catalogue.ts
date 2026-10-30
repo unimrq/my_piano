@@ -17,7 +17,7 @@ export async function loadCatalogue(): Promise<Song[]> {
   const response = await fetch("./catalogue/manifest.json");
   if (!response.ok) throw Error("内置曲库索引读取失败");
   const entries: Entry[] = await response.json();
-  // Personal scores stay on this machine and are excluded from the source repository.
+  // These MIDI editions keep their own source and rights information.
   const personal = Object.values(
     import.meta.glob<Entry[]>("./personal-catalogue.json", {
       eager: true,

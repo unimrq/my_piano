@@ -8,5 +8,3 @@ docs/*-smoke.json
 docs/installation-check.json
 *.log
 .env*
-src/personal-catalogue.json
-public/catalogue/personal-*.mid
