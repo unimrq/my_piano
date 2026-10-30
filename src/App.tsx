@@ -397,6 +397,8 @@ export default function App() {
           results: saved?.results ?? [],
           lastSong: selected.id,
           favorites: previous?.favorites ?? [],
+          toolbarPosition:
+            previous?.toolbarPosition === "bottom" ? "bottom" : "top",
         };
         setLibrary(data);
         setSongId(selected.id);
@@ -851,6 +853,7 @@ export default function App() {
   return (
     <div
       className={home ? "app web-app" : "app web-app practice-focus"}
+      data-toolbar-position={library.toolbarPosition ?? "top"}
       aria-busy={busy || loadingAudio}
     >
       {home && (
@@ -1379,6 +1382,23 @@ export default function App() {
                     hidden={settingsTab !== "display"}
                   >
                     <section className="settings-group">
+                      <label className="field">
+                        工具栏位置
+                        <select
+                          aria-label="工具栏位置"
+                          value={library.toolbarPosition ?? "top"}
+                          onChange={(event) =>
+                            setLibrary((current) => ({
+                              ...current,
+                              toolbarPosition: event.target.value as
+                                "top" | "bottom",
+                            }))
+                          }
+                        >
+                          <option value="top">顶部</option>
+                          <option value="bottom">底部</option>
+                        </select>
+                      </label>
                       <label className="field">
                         键盘音区
                         <select

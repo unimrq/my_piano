@@ -109,6 +109,7 @@ export interface Library {
   results: Result[];
   lastSong: string;
   favorites?: string[];
+  toolbarPosition?: "top" | "bottom";
 }
 export function selected(n: Note, hand: Hand) {
   return hand === "both" || n.hand === hand;

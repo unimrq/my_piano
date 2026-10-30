@@ -1802,6 +1802,15 @@ aside {
   flex-shrink: 0;
   padding: 0 16px;
 }
+.web-app.practice-focus[data-toolbar-position="bottom"] > header {
+  order: 1;
+  border-top: 1px solid #29292f;
+  border-bottom: 0;
+}
+.web-app.practice-focus[data-toolbar-position="bottom"]
+  > .scrim:not(.settings-scrim) {
+  top: 0;
+}
 .web-app.practice-focus > header button {
   min-height: 44px;
 }

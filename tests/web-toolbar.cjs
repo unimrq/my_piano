@@ -5,6 +5,43 @@ const { chromium, webkit } = require("playwright");
 const base = process.env.QINXI_WEB_URL || "http://localhost:4173",
   artifacts = path.resolve(__dirname, "../test-results");
 
+async function toolbarPositionIs(page, position) {
+  assert.equal(
+    await page.locator(".app").getAttribute("data-toolbar-position"),
+    position,
+  );
+  assert.equal(await page.locator(".practice-focus > header").count(), 1);
+  const geometry = await page.locator(".practice-focus").evaluate((app) => {
+    const header = app.querySelector(":scope > header").getBoundingClientRect();
+    const main = app.querySelector(":scope > main").getBoundingClientRect();
+    return {
+      headerTop: header.top,
+      headerBottom: header.bottom,
+      mainTop: main.top,
+      mainBottom: main.bottom,
+      height: window.innerHeight,
+    };
+  });
+  assert(
+    geometry.headerTop >= -1 && geometry.headerBottom <= geometry.height + 1,
+    `工具栏超出可视区域：${JSON.stringify(geometry)}`,
+  );
+  assert(
+    position === "top"
+      ? geometry.headerBottom <= geometry.mainTop + 1
+      : geometry.headerTop >= geometry.mainBottom - 1,
+    `工具栏实际位置与设置不符：${JSON.stringify({ position, geometry })}`,
+  );
+}
+
+async function setToolbarPosition(page, position) {
+  await page.getByTitle("更多设置", { exact: true }).tap();
+  await page.getByRole("tab", { name: "显示", exact: true }).tap();
+  await page.getByLabel("工具栏位置", { exact: true }).selectOption(position);
+  await page.locator(".settings-panel .panel-heading button").tap();
+  await toolbarPositionIs(page, position);
+}
+
 async function run(engine, name) {
   const browser = await engine.launch({ headless: true });
   const context = await browser.newContext({
@@ -66,95 +103,175 @@ async function run(engine, name) {
     await page.getByRole("button", { name: "加入曲库", exact: true }).tap();
     await page.locator(".sheet-host svg").first().waitFor();
     console.log(name, "score ready");
+    await toolbarPositionIs(page, "top");
     const tested = [];
-    for (const viewport of [
-      { width: 1024, height: 700 },
-      { width: 1024, height: 768 },
-      { width: 768, height: 1024 },
-      { width: 1194, height: 834 },
-    ]) {
-      await page.setViewportSize(viewport);
-      console.log(name, "viewport", viewport);
-      await page.waitForTimeout(100);
-      assert.equal(await page.locator(".timeline").count(), 0);
-      assert.equal(
-        await page
-          .locator(".sheet")
-          .evaluate((el) => el.nextElementSibling.className),
-        "resize",
-      );
-      assert.equal(await page.locator(".song-name").textContent(), longTitle);
-      const titleFit = await page.locator(".song-name").evaluate((el) => {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const text = range.getBoundingClientRect(),
-          button = el.closest("button").getBoundingClientRect(),
-          header = el.closest("header");
-        return {
-          clipped:
-            text.left < button.left - 1 ||
-            text.right > button.right + 1 ||
-            text.top < button.top - 1 ||
-            text.bottom > button.bottom + 1,
-          ellipsis: getComputedStyle(el).textOverflow === "ellipsis",
-          overflow: header.scrollWidth > header.clientWidth + 1,
-        };
-      });
-      assert.deepEqual(titleFit, {
-        clipped: false,
-        ellipsis: false,
-        overflow: false,
-      });
-      const fontSizes = await page
-        .locator(
-          "header .back-library, header .song-button, .toolbar-speed, .toolbar-speed input, .tempo-reading, .toolbar > .primary",
-        )
-        .evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
-      assert.equal(new Set(fontSizes).size, 1, JSON.stringify(fontSizes));
-      const tempo = page.getByLabel("速度", { exact: true });
-      await tempo.press("Home");
-      assert.equal(await tempo.inputValue(), "25");
-      await tempo.press("ArrowRight");
-      assert.equal(await tempo.inputValue(), "26");
-      await tempo.press("End");
-      assert.equal(await tempo.inputValue(), "150");
-      assert.match(await tempo.getAttribute("aria-valuetext"), /^\d+ BPM$/);
-      const hits = await page
-        .locator(".practice-focus > header button")
-        .evaluateAll((buttons) =>
-          buttons.map((button) => {
-            const rect = button.getBoundingClientRect(),
-              hit = document.elementFromPoint(
-                rect.x + rect.width / 2,
-                rect.y + rect.height / 2,
-              );
-            return {
-              label: button.title || button.textContent.trim(),
-              hit: button.contains(hit),
-            };
-          }),
+    for (const position of ["top", "bottom"]) {
+      if (position === "bottom") await setToolbarPosition(page, position);
+      for (const viewport of [
+        { width: 1024, height: 700 },
+        { width: 1024, height: 768 },
+        { width: 768, height: 1024 },
+        { width: 1194, height: 834 },
+      ]) {
+        await page.setViewportSize(viewport);
+        console.log(name, "viewport", viewport);
+        await page.waitForTimeout(100);
+        await toolbarPositionIs(page, position);
+        assert.equal(await page.locator(".timeline").count(), 0);
+        assert.equal(
+          await page
+            .locator(".sheet")
+            .evaluate((el) => el.nextElementSibling.className),
+          "resize",
         );
-      assert(
-        hits.every((entry) => entry.hit),
-        JSON.stringify({ viewport, hits }),
-      );
-      await page.getByTitle("更多设置", { exact: true }).tap();
-      await page.locator(".panel-heading").waitFor();
-      await page.locator(".panel-heading button").tap();
-      const loop = page.getByLabel("重复工具", { exact: true });
-      await loop.tap();
-      assert.equal(await loop.getAttribute("aria-pressed"), "true");
-      await loop.tap();
-      await page.getByRole("button", { name: "开始", exact: true }).tap();
-      console.log(name, "started");
-      await page.getByRole("button", { name: "暂停", exact: true }).tap();
-      await page.getByTitle("回到第一小节", { exact: true }).tap();
-      await page.getByRole("button", { name: "开始", exact: true }).waitFor();
-      tested.push(viewport);
+        assert.equal(await page.locator(".song-name").textContent(), longTitle);
+        const titleFit = await page.locator(".song-name").evaluate((el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const text = range.getBoundingClientRect(),
+            button = el.closest("button").getBoundingClientRect(),
+            header = el.closest("header");
+          return {
+            clipped:
+              text.left < button.left - 1 ||
+              text.right > button.right + 1 ||
+              text.top < button.top - 1 ||
+              text.bottom > button.bottom + 1,
+            ellipsis: getComputedStyle(el).textOverflow === "ellipsis",
+            overflow: header.scrollWidth > header.clientWidth + 1,
+          };
+        });
+        assert.deepEqual(titleFit, {
+          clipped: false,
+          ellipsis: false,
+          overflow: false,
+        });
+        const fontSizes = await page
+          .locator(
+            "header .back-library, header .song-button, .toolbar-speed, .toolbar-speed input, .tempo-reading, .toolbar > .primary",
+          )
+          .evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
+        assert.equal(new Set(fontSizes).size, 1, JSON.stringify(fontSizes));
+        const tempo = page.getByLabel("速度", { exact: true });
+        await tempo.press("Home");
+        assert.equal(await tempo.inputValue(), "25");
+        await tempo.press("ArrowRight");
+        assert.equal(await tempo.inputValue(), "26");
+        await tempo.press("End");
+        assert.equal(await tempo.inputValue(), "150");
+        assert.match(await tempo.getAttribute("aria-valuetext"), /^\d+ BPM$/);
+        const speedBox = await tempo.boundingBox();
+        await page.touchscreen.tap(
+          speedBox.x + speedBox.width * 0.25,
+          speedBox.y + speedBox.height / 2,
+        );
+        assert.notEqual(
+          await tempo.inputValue(),
+          "150",
+          "触摸速度滑条没有响应",
+        );
+        const hits = await page
+          .locator(
+            '.practice-focus > header button, .practice-focus > header select, .practice-focus > header input[type="range"]',
+          )
+          .evaluateAll((controls) =>
+            controls.map((control) => {
+              const rect = control.getBoundingClientRect(),
+                hit = document.elementFromPoint(
+                  rect.x + rect.width / 2,
+                  rect.y + rect.height / 2,
+                );
+              return {
+                label:
+                  control.getAttribute("aria-label") ||
+                  control.title ||
+                  control.textContent.trim(),
+                hit: control.contains(hit),
+              };
+            }),
+          );
+        assert(
+          hits.every((entry) => entry.hit),
+          JSON.stringify({ position, viewport, hits }),
+        );
+        await page.getByTitle("更多设置", { exact: true }).tap();
+        await page.locator(".panel-heading").waitFor();
+        await page.locator(".panel-heading button").tap();
+        const metronome = page.getByRole("button", {
+          name: "节拍器",
+          exact: true,
+        });
+        const previousMetronome = await metronome.getAttribute("aria-pressed");
+        await metronome.tap();
+        assert.notEqual(
+          await metronome.getAttribute("aria-pressed"),
+          previousMetronome,
+        );
+        await metronome.tap();
+        assert.equal(
+          await metronome.getAttribute("aria-pressed"),
+          previousMetronome,
+        );
+        const loop = page.getByLabel("重复工具", { exact: true });
+        await loop.tap();
+        assert.equal(await loop.getAttribute("aria-pressed"), "true");
+        await loop.tap();
+        await page.getByRole("button", { name: "开始", exact: true }).tap();
+        console.log(name, "started");
+        await page.getByRole("button", { name: "暂停", exact: true }).tap();
+        await page.getByTitle("回到第一小节", { exact: true }).tap();
+        await page.getByRole("button", { name: "开始", exact: true }).waitFor();
+        tested.push({ position, ...viewport });
+      }
     }
+    await page.getByRole("button", { name: "开始", exact: true }).tap();
+    await setToolbarPosition(page, "top");
+    await page.getByRole("button", { name: "暂停", exact: true }).waitFor();
+    await setToolbarPosition(page, "bottom");
+    await page.getByRole("button", { name: "暂停", exact: true }).tap();
+    for (const practiceMode of ["wait", "free", "rhythm", "listen"]) {
+      await page
+        .getByLabel("练习模式", { exact: true })
+        .selectOption(practiceMode);
+      await toolbarPositionIs(page, "bottom");
+    }
+    await page.screenshot({
+      path: path.join(artifacts, `toolbar-bottom-${name}.png`),
+    });
     await page.getByRole("button", { name: "曲库", exact: true }).tap();
     await page.locator(".library-home").waitFor();
-    return { engine: name, passed: true, simulatedViewportChanges: tested };
+    await page
+      .locator(".music-card")
+      .filter({ hasText: "欢乐颂" })
+      .first()
+      .tap();
+    await page.locator(".sheet-host svg").first().waitFor();
+    await toolbarPositionIs(page, "bottom");
+    await page.reload();
+    await page.locator(".music-card").first().waitFor();
+    assert.equal(
+      await page.locator(".app").getAttribute("data-toolbar-position"),
+      "bottom",
+    );
+    await page
+      .locator(".music-card")
+      .filter({ hasText: "欢乐颂" })
+      .first()
+      .tap();
+    await page.locator(".sheet-host svg").first().waitFor();
+    await toolbarPositionIs(page, "bottom");
+    await setToolbarPosition(page, "top");
+    await page.screenshot({
+      path: path.join(artifacts, `toolbar-top-${name}.png`),
+    });
+    await page.getByRole("button", { name: "曲库", exact: true }).tap();
+    await page.locator(".library-home").waitFor();
+    return {
+      engine: name,
+      passed: true,
+      simulatedViewportChanges: tested,
+      globalBottomPreferencePersists: ["四种模式", "切换曲目", "重新加载"],
+    };
   } finally {
     await browser.close();
   }
@@ -175,6 +292,8 @@ async function run(engine, name) {
         realIPadMidiWebTested: false,
         checks: [
           "工具栏按钮中心未被页面覆盖",
+          "顶部与底部工具栏在四种视口均可触摸按钮、模式及速度控件",
+          "底部位置是全局偏好，切换四种模式、曲目和重新加载均保留，可切回顶部",
           "调整视口后触控设置、重复、开始、暂停、重来及返回",
           "无进度条，长曲名在横竖屏完整显示且顶栏无溢出",
           "搜索焦点无额外内框",
